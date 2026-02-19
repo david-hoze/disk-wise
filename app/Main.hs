@@ -45,7 +45,7 @@ optionsParser = Options
 
 -- Hardcoded wiki config (user configures nothing)
 wikiOwner :: T.Text
-wikiOwner = "natanh"
+wikiOwner = "david-hoze"
 
 wikiRepo :: T.Text
 wikiRepo = "disk-wise-wiki"
