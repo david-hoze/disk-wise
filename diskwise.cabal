@@ -1,0 +1,67 @@
+cabal-version:      3.0
+name:               diskwise
+version:            2.0.0.0
+synopsis:           AI-powered disk cleanup with shared wiki knowledge
+license:            MIT
+build-type:         Simple
+
+executable diskwise
+  main-is:          Main.hs
+  hs-source-dirs:   app
+  build-depends:
+      base          >= 4.14 && < 5
+    , diskwise-lib
+    , optparse-applicative >= 0.16
+    , text          >= 2.0
+  default-language: Haskell2010
+  ghc-options:      -Wall -threaded
+
+library diskwise-lib
+  exposed-modules:
+      DiskWise.Types
+    , DiskWise.Wiki
+    , DiskWise.Claude
+    , DiskWise.Scanner
+    , DiskWise.CLI
+  hs-source-dirs:   src
+  build-depends:
+      base          >= 4.14 && < 5
+    , aeson         >= 2.0
+    , base64-bytestring
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , http-client
+    , http-client-tls
+    , http-types
+    , process
+    , text          >= 2.0
+    , time
+    , vector
+  default-language: Haskell2010
+  ghc-options:      -Wall
+
+test-suite diskwise-tests
+  type:             exitcode-stdio-1.0
+  main-is:          Spec.hs
+  hs-source-dirs:   test
+  other-modules:
+      DiskWise.TypesSpec
+    , DiskWise.WikiSpec
+    , DiskWise.ScannerSpec
+    , DiskWise.ClaudeSpec
+  build-depends:
+      base          >= 4.14 && < 5
+    , diskwise-lib
+    , hspec         >= 2.7
+    , aeson
+    , bytestring
+    , directory
+    , filepath
+    , text          >= 2.0
+    , time
+  build-tool-depends:
+      hspec-discover:hspec-discover
+  default-language: Haskell2010
+  ghc-options:      -Wall -threaded

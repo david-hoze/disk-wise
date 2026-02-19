@@ -1,0 +1,8 @@
+dist-newstyle/
+.stack-work/
+*.hi
+*.o
+*.dyn_hi
+*.dyn_o
+result
+.obsidian/
