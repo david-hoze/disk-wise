@@ -5,20 +5,38 @@ module DiskWise.Scanner
   ( scanSystem
   , runCleanupAction
   , parseFindings
+  , toMingwPath
   ) where
 
 import Control.Exception (catch, SomeException)
+import Data.Char (toLower)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import System.Process (readProcess, readCreateProcessWithExitCode, shell)
+import System.Environment (lookupEnv)
+import System.Process (readCreateProcessWithExitCode, proc)
 import System.Exit (ExitCode(..))
 
 import DiskWise.Types
 
--- | Run a comprehensive system scan and return results as text
+-- | Convert a Windows path like "C:\Users\foo" to MINGW path "/c/Users/foo"
+-- Also handles paths that are already MINGW-style (no-op).
+toMingwPath :: FilePath -> FilePath
+toMingwPath (drive:':':'\\':rest) =
+  '/' : toLower drive : '/' : map bsToFs rest
+  where bsToFs '\\' = '/'
+        bsToFs c    = c
+toMingwPath (drive:':':'/':rest) =
+  '/' : toLower drive : '/' : rest
+toMingwPath other = other
+
+-- | Run a comprehensive system scan and return results as text.
+-- Only gathers raw filesystem data — analysis is left to Claude + wiki.
 scanSystem :: AppConfig -> IO T.Text
 scanSystem config = do
-  sections <- mapM gatherSection (scanSections (configScanPaths config))
+  rawHome <- maybe "/tmp" id <$> lookupEnv "HOME"
+  let home = toMingwPath rawHome
+      paths = map toMingwPath (configScanPaths config)
+  sections <- mapM gatherSection (scanSections home paths)
   pure $ T.unlines sections
 
 data ScanSection = ScanSection
@@ -26,28 +44,16 @@ data ScanSection = ScanSection
   , sectionCommand :: String
   }
 
-scanSections :: [FilePath] -> [ScanSection]
-scanSections paths =
+-- | Generic scan sections — no tool-specific knowledge, just raw filesystem data.
+scanSections :: FilePath -> [FilePath] -> [ScanSection]
+scanSections _home paths =
   [ ScanSection "Disk Usage Overview" "df -h"
   , ScanSection "Largest directories" $
-      "du -sh " <> unwords paths <> " 2>/dev/null | sort -rh | head -20"
+      "du -sh " <> unwords (concatMap (\p -> [p <> "/*/", p <> "/.*/"])  paths)
+        <> " 2>/dev/null | sort -rh | head -50"
   , ScanSection "Large files (>100MB)" $
       "find " <> unwords paths
-        <> " -type f -size +100M -exec ls -lh {} \\; 2>/dev/null | head -30"
-  , ScanSection "Old files (>90 days, >10MB)" $
-      "find " <> unwords paths
-        <> " -type f -mtime +90 -size +10M -exec ls -lh {} \\; 2>/dev/null | head -30"
-  , ScanSection "Package manager caches"
-      "du -sh ~/.npm ~/.cache/pip ~/.cache/yarn /var/cache/apt \
-      \~/.cabal/store ~/.stack ~/.local/state/cabal 2>/dev/null"
-  , ScanSection "Docker usage"
-      "docker system df 2>/dev/null || echo 'Docker not found'"
-  , ScanSection "Temp directories"
-      "du -sh /tmp /var/tmp ~/.cache 2>/dev/null"
-  , ScanSection "Log files"
-      "find /var/log -type f -size +10M -exec ls -lh {} \\; 2>/dev/null | head -10"
-  , ScanSection "Haskell-specific"
-      "du -sh ~/.ghcup ~/.cabal ~/.stack dist-newstyle .stack-work 2>/dev/null"
+        <> " -maxdepth 5 -type f -size +100M 2>/dev/null | head -40 | xargs du -sh 2>/dev/null"
   ]
 
 gatherSection :: ScanSection -> IO T.Text
@@ -61,16 +67,17 @@ gatherSection section = do
 
 runCommand :: String -> IO T.Text
 runCommand cmd = do
-  result <- readProcess "sh" ["-c", cmd] ""
-    `catch` (\(_ :: SomeException) -> pure "(command failed)")
-  pure (T.pack result)
+  (_, out, _) <- readCreateProcessWithExitCode (proc "sh" ["-c", cmd]) ""
+    `catch` (\(_ :: SomeException) -> pure (ExitFailure 1, "(command failed)", ""))
+  pure (T.pack out)
 
 -- | Execute a cleanup action (with confirmation already obtained)
+-- Uses sh -c so MINGW paths and redirections work correctly.
 runCleanupAction :: CleanupAction -> IO (Either T.Text T.Text)
 runCleanupAction action = do
   TIO.putStrLn $ "Running: " <> actionDescription action
   (exit, out, err) <- readCreateProcessWithExitCode
-    (shell (T.unpack (actionCommand action))) ""
+    (proc "sh" ["-c", T.unpack (actionCommand action)]) ""
   case exit of
     ExitSuccess   -> pure $ Right ("Done: " <> actionDescription action
                                    <> "\n" <> T.pack out)
@@ -142,9 +149,10 @@ parseFindings scanOutput =
     categorize path
       | any (`T.isInfixOf` lp) [".cache", "cache", "_cacache"]  = "cache"
       | any (`T.isInfixOf` lp) [".log", "/log/", "/logs/"]      = "log"
-      | any (`T.isInfixOf` lp) ["/tmp", "/temp"]                 = "temp"
+      | any (`T.isInfixOf` lp) ["/tmp", "/temp", "appdata/local/temp"] = "temp"
       | any (`T.isInfixOf` lp) ["dist-newstyle", ".stack-work", "node_modules", "target/"] = "build-artifact"
       | any (`T.isInfixOf` lp) ["docker"]                        = "docker"
-      | any (`T.isInfixOf` lp) [".npm", "pip", "yarn", "cabal", ".stack", ".ghcup"] = "package-manager"
+      | any (`T.isInfixOf` lp) [".npm", "pip", "yarn", "cabal", ".stack", ".ghcup", "portablehaskell"] = "package-manager"
+      | any (`T.isInfixOf` lp) ["appdata"]                       = "app-data"
       | otherwise = "other"
       where lp = T.toLower path

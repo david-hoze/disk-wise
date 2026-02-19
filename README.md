@@ -28,7 +28,7 @@ DiskWise scans your filesystem, consults a community-maintained wiki for context
 
 ### The Flow
 
-1. **Investigate**: Scanner gathers disk data. The agent fetches wiki pages from GitHub and matches them to findings by path patterns and tool names. Unmatched findings are flagged as novel. Everything goes to Claude.
+1. **Investigate**: A generic scanner runs `df`, `du`, and `find` to discover what's large — no tool-specific knowledge baked in. The agent fetches wiki pages from GitHub and matches them to findings by path patterns and tool names. Unmatched findings are flagged as novel. Everything goes to Claude for interpretation.
 2. **Act**: Claude proposes cleanup actions with risk levels and size estimates. You confirm each one before it runs. Nothing is ever deleted without your say-so.
 3. **Learn**: Claude reviews the entire session — what was scanned, what actions ran, what failed, what surprised it — and drafts wiki contributions for anything useful. The bar is low: if it might save a future agent five seconds, it gets written.
 4. **Refactor**: After learning, Claude reviews the pages it touched and surrounding pages, improving quality — merging duplicates, rewriting, reorganizing. It loops until the wiki converges (or hits 5 passes). Each pass is a separate commit.
@@ -124,6 +124,8 @@ The wiki is built in. No configuration needed. Reads are unauthenticated (public
 
 ## Usage
 
+### Interactive Mode
+
 ```bash
 # Interactive mode (default)
 diskwise
@@ -141,6 +143,26 @@ diskwise --api-key sk-ant-...
 diskwise --model claude-sonnet-4-20250514
 ```
 
+### Batch Mode
+
+Batch mode splits the flow into composable JSON subcommands, usable by scripts or outer AI agents:
+
+```bash
+# Step 1: Scan the system, get JSON findings
+diskwise scan > scan.json
+
+# Step 2: Analyze with wiki + Claude, get advice as JSON
+diskwise analyze scan.json > advice.json
+
+# Step 3: Execute a specific cleanup action
+diskwise cleanup '{"description":"Remove pip cache","command":"pip cache purge","risk_level":"low","size_estimate":"~500M","wiki_ref":null}'
+
+# Step 4: Push a wiki contribution
+diskwise contribute '{"type":"CreatePage","path":"python/pip.md","content":"# pip\n...","summary":"add pip page"}'
+```
+
+All batch subcommands write progress to stderr and results to stdout.
+
 ## Project Structure
 
 ```
@@ -151,7 +173,8 @@ diskwise/
 │   ├── Types.hs             # Domain types (WikiPage, ClaudeAdvice, SessionLog, etc.)
 │   ├── Wiki.hs              # GitHub wiki API: fetch, match, create, update, retry
 │   ├── Claude.hs            # Claude access: CLI subprocess + API fallback
-│   ├── Scanner.hs           # System scanning (du, find, etc.) + finding parser
+│   ├── Scanner.hs           # Generic system scanning (du, find) + finding parser
+│   ├── Batch.hs             # Non-interactive JSON subcommands (scan, analyze, cleanup, contribute)
 │   └── CLI.hs               # Interactive UI: investigate, act, learn, refactor
 ├── test/DiskWise/
 │   ├── TypesSpec.hs         # JSON round-trip tests for all types
@@ -166,6 +189,7 @@ diskwise/
 
 ## Design Decisions
 
+- **Generic scanner, smart interpreter**: The scanner knows nothing about specific tools — it just finds what's big. All interpretation (what's safe to delete, how to clean up) comes from Claude + the wiki. This keeps the scanner simple and portable across platforms.
 - **Wiki over rules**: Instead of a local rules engine, DiskWise uses a shared GitHub wiki. Every agent contributes to a growing knowledge base that benefits all users.
 - **Session-aware learning**: Claude sees the full session — actions executed, errors encountered, user decisions — not just scan data. This grounds wiki contributions in real experience.
 - **Refactoring loop**: After contributing, the agent improves wiki quality until convergence. The wiki gets better organized over time without human curation.

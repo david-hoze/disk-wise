@@ -8,16 +8,24 @@ import System.Environment (lookupEnv)
 
 import DiskWise.Types
 import DiskWise.CLI
+import DiskWise.Batch
 
-data Options = Options
+data Command
+  = Interactive CommonOpts
+  | BatchScan CommonOpts
+  | BatchAnalyze CommonOpts FilePath
+  | BatchCleanup String
+  | BatchContribute CommonOpts String
+
+data CommonOpts = CommonOpts
   { optScanPaths  :: [FilePath]
   , optMinSizeMB  :: Integer
   , optModel      :: String
   , optApiKey     :: Maybe String
   } deriving (Show)
 
-optionsParser :: Parser Options
-optionsParser = Options
+commonOptsParser :: Parser CommonOpts
+commonOptsParser = CommonOpts
   <$> many (strOption
         ( long "scan-path"
        <> short 'p'
@@ -43,7 +51,25 @@ optionsParser = Options
        <> help "Anthropic API key (overrides ANTHROPIC_API_KEY env var)"
         ))
 
--- Hardcoded wiki config (user configures nothing)
+commandParser :: Parser Command
+commandParser = subparser
+  ( command "interactive" (info (Interactive <$> commonOptsParser)
+      (progDesc "Interactive mode (default)"))
+  <> command "scan" (info (BatchScan <$> commonOptsParser)
+      (progDesc "Scan system and output JSON findings to stdout"))
+  <> command "analyze" (info (BatchAnalyze <$> commonOptsParser
+      <*> strArgument (metavar "SCAN_FILE" <> help "Path to scan output JSON file"))
+      (progDesc "Analyze scan output with wiki + Claude, output JSON advice"))
+  <> command "cleanup" (info (BatchCleanup
+      <$> strArgument (metavar "ACTION_JSON" <> help "CleanupAction as JSON string"))
+      (progDesc "Execute a single cleanup action from JSON"))
+  <> command "contribute" (info (BatchContribute <$> commonOptsParser
+      <*> strArgument (metavar "CONTRIB_JSON" <> help "WikiContribution as JSON string"))
+      (progDesc "Push a single wiki contribution from JSON"))
+  )
+  <|> (Interactive <$> commonOptsParser)  -- default to interactive
+
+-- Hardcoded wiki config
 wikiOwner :: T.Text
 wikiOwner = "david-hoze"
 
@@ -51,23 +77,43 @@ wikiRepo :: T.Text
 wikiRepo = "disk-wise-wiki"
 
 wikiToken :: T.Text
-wikiToken = ""  -- Set via DISKWISE_WIKI_TOKEN env var
+wikiToken = ""
 
 main :: IO ()
 main = do
-  opts <- execParser $ info (optionsParser <**> helper)
+  cmd <- execParser $ info (commandParser <**> helper)
     ( fullDesc
    <> progDesc "AI-powered disk cleanup with shared wiki knowledge"
    <> header "diskwise - collaborative disk cleanup intelligence"
     )
 
-  -- Get API key from flag or environment
+  case cmd of
+    Interactive opts -> do
+      config <- buildConfig opts
+      runApp config
+
+    BatchScan opts -> do
+      config <- buildConfig opts
+      batchScan config
+
+    BatchAnalyze opts scanFile -> do
+      config <- buildConfig opts
+      batchAnalyze config scanFile
+
+    BatchCleanup actionJson ->
+      batchCleanup actionJson
+
+    BatchContribute opts contribJson -> do
+      config <- buildConfig opts
+      batchContribute config contribJson
+
+buildConfig :: CommonOpts -> IO AppConfig
+buildConfig opts = do
   apiKeyMaybe <- case optApiKey opts of
     Just key -> pure (Just key)
     Nothing  -> lookupEnv "ANTHROPIC_API_KEY"
   let apiKey = maybe "" T.pack apiKeyMaybe
 
-  -- Get wiki token from environment
   wikiTokenEnv <- lookupEnv "DISKWISE_WIKI_TOKEN"
   let token = maybe wikiToken T.pack wikiTokenEnv
 
@@ -76,14 +122,12 @@ main = do
         [] -> [home]
         ps -> ps
 
-  let config = AppConfig
-        { configApiKey     = apiKey
-        , configWikiOwner  = wikiOwner
-        , configWikiRepo   = wikiRepo
-        , configWikiToken  = token
-        , configScanPaths  = scanPaths
-        , configMinSizeMB  = optMinSizeMB opts
-        , configModel      = T.pack (optModel opts)
-        }
-
-  runApp config
+  pure AppConfig
+    { configApiKey     = apiKey
+    , configWikiOwner  = wikiOwner
+    , configWikiRepo   = wikiRepo
+    , configWikiToken  = token
+    , configScanPaths  = scanPaths
+    , configMinSizeMB  = optMinSizeMB opts
+    , configModel      = T.pack (optModel opts)
+    }

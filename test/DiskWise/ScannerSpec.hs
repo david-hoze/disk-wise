@@ -6,7 +6,7 @@ import qualified Data.Text as T
 import Test.Hspec
 
 import DiskWise.Types
-import DiskWise.Scanner (parseFindings)
+import DiskWise.Scanner (parseFindings, toMingwPath)
 
 spec :: Spec
 spec = do
@@ -59,3 +59,19 @@ spec = do
       length findings `shouldBe` 3
       findingSize (findings !! 0) `shouldBe` round (15 * 1024 :: Double)
       findingSize (findings !! 1) `shouldBe` round (2.5 * 1024 * 1024 * 1024 :: Double)
+
+  describe "toMingwPath" $ do
+    it "converts Windows backslash paths" $ do
+      toMingwPath "C:\\Users\\natanh" `shouldBe` "/c/Users/natanh"
+
+    it "converts Windows forward-slash paths" $ do
+      toMingwPath "C:/Users/natanh" `shouldBe` "/c/Users/natanh"
+
+    it "lowercases the drive letter" $ do
+      toMingwPath "D:\\Data" `shouldBe` "/d/Data"
+
+    it "leaves MINGW paths unchanged" $ do
+      toMingwPath "/c/Users/natanh" `shouldBe` "/c/Users/natanh"
+
+    it "leaves Unix paths unchanged" $ do
+      toMingwPath "/home/user" `shouldBe` "/home/user"

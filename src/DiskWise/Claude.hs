@@ -27,8 +27,9 @@ import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Header (hContentType)
 import Network.HTTP.Types.Status (statusCode)
+import System.Environment (lookupEnv)
 import System.Exit (ExitCode(..))
-import System.Process (readCreateProcessWithExitCode, proc)
+import System.Process (readCreateProcessWithExitCode, readProcess, proc, shell)
 
 import DiskWise.Types
 
@@ -85,17 +86,33 @@ callClaude config sysPrompt userPrompt = do
       else callClaudeApi config sysPrompt userPrompt
 
 -- | Invoke Claude Code CLI as subprocess with --print flag
+-- Uses sh -c to invoke claude, which handles PATH resolution on all platforms
 callClaudeCode :: T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
 callClaudeCode sysPrompt userPrompt = do
-  let args = ["--print", "--system-prompt", T.unpack sysPrompt, T.unpack userPrompt]
-  result <- try $ readCreateProcessWithExitCode (proc "claude" args) ""
-  case result of
-    Left (e :: SomeException) ->
-      pure (Left (ClaudeError ("Claude CLI not available: " <> T.pack (show e))))
-    Right (ExitSuccess, out, _) ->
-      pure (Right (T.pack out))
-    Right (ExitFailure code, _, err) ->
-      pure (Left (ClaudeError ("Claude CLI failed (exit " <> T.pack (show code) <> "): " <> T.pack err)))
+  -- First check claude is available
+  checkResult <- try $ readProcess "sh" ["-c", "claude --version 2>/dev/null"] ""
+    :: IO (Either SomeException String)
+  case checkResult of
+    Left e -> pure (Left (ClaudeError ("Claude CLI not found: " <> T.pack (show e))))
+    Right v | null v -> pure (Left (ClaudeError "Claude CLI not found"))
+    Right _ -> do
+      -- Use shell to invoke claude (handles PATH on MINGW/Windows)
+      let cmd = "claude --print --system-prompt " <> shellQuote (T.unpack sysPrompt)
+                <> " " <> shellQuote (T.unpack userPrompt)
+      result <- try $ readCreateProcessWithExitCode (shell cmd) ""
+      case result of
+        Left (e :: SomeException) ->
+          pure (Left (ClaudeError ("Claude CLI failed: " <> T.pack (show e))))
+        Right (ExitSuccess, out, _) ->
+          pure (Right (T.pack out))
+        Right (ExitFailure code, _, err) ->
+          pure (Left (ClaudeError ("Claude CLI exit " <> T.pack (show code) <> ": " <> T.pack err)))
+
+-- | Shell-quote a string for safe embedding in sh -c commands
+shellQuote :: String -> String
+shellQuote s = "'" <> concatMap esc s <> "'"
+  where esc '\'' = "'\\''"
+        esc c    = [c]
 
 -- | Call Claude via the Anthropic API
 callClaudeApi :: AppConfig -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
