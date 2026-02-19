@@ -6,7 +6,9 @@ import qualified Data.Text as T
 import Test.Hspec
 
 import DiskWise.Types
-import DiskWise.Claude (buildPrompt, buildSystemPrompt, parseAdvice)
+import DiskWise.Claude (buildPrompt, buildSystemPrompt, buildLearnPrompt,
+                        buildRefactorPrompt, parseAdvice, parseRefactorResult,
+                        prefixCommitMsg)
 
 spec :: Spec
 spec = do
@@ -18,8 +20,17 @@ spec = do
       prompt `shouldSatisfy` T.isInfixOf "analysis"
 
     it "includes risk level guidance" $ do
+      buildSystemPrompt `shouldSatisfy` T.isInfixOf "risk_level"
+
+    it "includes wiki page format template" $ do
       let prompt = buildSystemPrompt
-      prompt `shouldSatisfy` T.isInfixOf "risk_level"
+      prompt `shouldSatisfy` T.isInfixOf "## Where it stores data"
+      prompt `shouldSatisfy` T.isInfixOf "## History"
+
+    it "includes contribution guidance" $ do
+      let prompt = buildSystemPrompt
+      prompt `shouldSatisfy` T.isInfixOf "diskwise-agent:"
+      prompt `shouldSatisfy` T.isInfixOf "bar for contributing is LOW"
 
   describe "buildPrompt" $ do
     it "includes scan output" $ do
@@ -35,14 +46,47 @@ spec = do
       prompt `shouldSatisfy` T.isInfixOf "tools/npm.md"
 
     it "shows placeholder when no wiki pages" $ do
-      let prompt = buildPrompt "scan output" [] []
-      prompt `shouldSatisfy` T.isInfixOf "No wiki pages available"
+      buildPrompt "scan output" [] [] `shouldSatisfy` T.isInfixOf "No wiki pages available"
 
     it "includes novel findings section" $ do
       let finding = Finding "/tmp/big" 5000000000 "temp" "5GB temp file"
           prompt = buildPrompt "scan output" [] [finding]
       prompt `shouldSatisfy` T.isInfixOf "NOVEL FINDINGS"
       prompt `shouldSatisfy` T.isInfixOf "5GB temp file"
+
+  describe "buildLearnPrompt" $ do
+    it "includes session events" $ do
+      let action = CleanupAction "Clean npm" "npm cache clean" "low" Nothing Nothing
+          session = (emptySessionLog { logScanOutput = "scan" })
+                      `addEvent` ActionExecuted action "cleaned 500MB"
+                      `addEvent` ActionFailed action "permission denied"
+          prompt = buildLearnPrompt session "agent@test"
+      prompt `shouldSatisfy` T.isInfixOf "EXECUTED"
+      prompt `shouldSatisfy` T.isInfixOf "cleaned 500MB"
+      prompt `shouldSatisfy` T.isInfixOf "FAILED"
+      prompt `shouldSatisfy` T.isInfixOf "permission denied"
+
+    it "includes agent identity" $ do
+      let prompt = buildLearnPrompt emptySessionLog "agent@myhost"
+      prompt `shouldSatisfy` T.isInfixOf "agent@myhost"
+
+  describe "buildRefactorPrompt" $ do
+    it "includes touched paths" $ do
+      let prompt = buildRefactorPrompt [] ["tools/npm.md", "tools/yarn.md"] "agent@x"
+      prompt `shouldSatisfy` T.isInfixOf "tools/npm.md"
+      prompt `shouldSatisfy` T.isInfixOf "tools/yarn.md"
+
+    it "includes all wiki pages" $ do
+      let page = WikiPage "tools/npm.md" "npm" "npm" "# npm content" "sha"
+          prompt = buildRefactorPrompt [page] [] "agent@x"
+      prompt `shouldSatisfy` T.isInfixOf "# npm content"
+
+  describe "prefixCommitMsg" $ do
+    it "adds prefix to plain messages" $
+      prefixCommitMsg "add npm page" `shouldBe` "diskwise-agent: add npm page"
+
+    it "does not double-prefix" $
+      prefixCommitMsg "diskwise-agent: add npm page" `shouldBe` "diskwise-agent: add npm page"
 
   describe "parseAdvice" $ do
     it "parses valid JSON response" $ do
@@ -93,16 +137,43 @@ spec = do
         Left err -> expectationFailure $ "Parse failed: " <> show err
 
     it "returns error for invalid JSON" $ do
-      let json = "This is not JSON at all"
-      case parseAdvice json of
+      case parseAdvice "This is not JSON at all" of
         Left (ParseError _) -> pure ()
         _                   -> expectationFailure "Expected ParseError"
 
     it "handles missing optional fields gracefully" $ do
-      let json = "{\"analysis\": \"Summary\"}"
-      case parseAdvice json of
+      case parseAdvice "{\"analysis\": \"Summary\"}" of
         Right advice -> do
           adviceAnalysis advice `shouldBe` "Summary"
           adviceCleanupActions advice `shouldBe` []
           adviceContributions advice `shouldBe` []
+        Left err -> expectationFailure $ "Parse failed: " <> show err
+
+  describe "parseRefactorResult" $ do
+    it "parses a complete refactoring response" $ do
+      let json = T.unlines
+            [ "{"
+            , "  \"contributions\": ["
+            , "    {"
+            , "      \"type\": \"AmendPage\","
+            , "      \"path\": \"tools/npm.md\","
+            , "      \"content\": \"# npm (improved)\","
+            , "      \"summary\": \"improve npm page\""
+            , "    }"
+            , "  ],"
+            , "  \"done\": false,"
+            , "  \"summary\": \"Improved npm page clarity\""
+            , "}"
+            ]
+      case parseRefactorResult json of
+        Right r -> do
+          refactorDone r `shouldBe` False
+          length (refactorContributions r) `shouldBe` 1
+          refactorSummary r `shouldBe` "Improved npm page clarity"
+        Left err -> expectationFailure $ "Parse failed: " <> show err
+
+    it "defaults done=true when missing" $ do
+      let json = "{\"contributions\": [], \"summary\": \"nothing to do\"}"
+      case parseRefactorResult json of
+        Right r -> refactorDone r `shouldBe` True
         Left err -> expectationFailure $ "Parse failed: " <> show err

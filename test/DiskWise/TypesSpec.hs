@@ -102,3 +102,26 @@ spec = do
         , configMinSizeMB  = 50
         , configModel      = "claude-sonnet-4-20250514"
         }
+
+  describe "RefactorResult JSON round-trip" $
+    it "refactor result" $
+      jsonRoundTrip RefactorResult
+        { refactorContributions =
+            [ WikiContribution AmendPage "tools/npm.md"
+                "# npm (improved)" "improve npm page"
+            ]
+        , refactorDone    = False
+        , refactorSummary = "Improved npm page clarity"
+        }
+
+  describe "SessionLog" $ do
+    it "starts empty" $ do
+      logEvents emptySessionLog `shouldBe` []
+      logScanOutput emptySessionLog `shouldBe` ""
+
+    it "tracks events with addEvent" $ do
+      let action = CleanupAction "test" "echo hi" "low" Nothing Nothing
+          sl = emptySessionLog
+                 `addEvent` ActionExecuted action "done"
+                 `addEvent` ActionSkipped action
+      length (logEvents sl) `shouldBe` 2

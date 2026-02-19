@@ -11,6 +11,11 @@ module DiskWise.Types
   , Finding(..)
   , AppConfig(..)
   , DiskWiseError(..)
+  , SessionEvent(..)
+  , SessionLog(..)
+  , emptySessionLog
+  , addEvent
+  , RefactorResult(..)
   ) where
 
 import Data.Aeson
@@ -115,3 +120,43 @@ data DiskWiseError
   | ParseError Text
   | WikiNotAvailable
   deriving (Show, Eq)
+
+-- | An event that occurred during the session, for Claude to learn from
+data SessionEvent
+  = ActionExecuted CleanupAction Text   -- ^ action + output
+  | ActionFailed CleanupAction Text     -- ^ action + error message
+  | ActionSkipped CleanupAction         -- ^ user declined
+  | ContribPushed WikiContribution      -- ^ successfully pushed to wiki
+  | ContribFailed WikiContribution Text -- ^ failed to push + error
+  deriving (Show, Eq)
+
+-- | Log of everything that happened in a session
+data SessionLog = SessionLog
+  { logScanOutput   :: Text
+  , logFindings     :: [Finding]
+  , logAdvice       :: Maybe ClaudeAdvice
+  , logEvents       :: [SessionEvent]
+  } deriving (Show, Eq)
+
+-- | Create an empty session log
+emptySessionLog :: SessionLog
+emptySessionLog = SessionLog
+  { logScanOutput = ""
+  , logFindings   = []
+  , logAdvice     = Nothing
+  , logEvents     = []
+  }
+
+-- | Append an event to the session log
+addEvent :: SessionLog -> SessionEvent -> SessionLog
+addEvent sl ev = sl { logEvents = logEvents sl ++ [ev] }
+
+-- | What Claude returns from a refactoring pass
+data RefactorResult = RefactorResult
+  { refactorContributions :: [WikiContribution]
+  , refactorDone          :: Bool  -- ^ True if no meaningful improvements found
+  , refactorSummary       :: Text  -- ^ What was improved this pass
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON RefactorResult
+instance FromJSON RefactorResult

@@ -7,9 +7,11 @@ module DiskWise.CLI
   ) where
 
 import Control.Exception (catch, SomeException)
+import Data.IORef
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import System.Directory (createDirectoryIfMissing, getHomeDirectory)
+import System.Directory (createDirectoryIfMissing, getHomeDirectory,
+                         listDirectory, doesDirectoryExist, removeFile)
 import System.IO (hFlush, stdout, hSetBuffering, stdin, BufferMode(..))
 
 import DiskWise.Types
@@ -28,6 +30,9 @@ runApp config = do
   TIO.putStrLn "|   wiki knowledge                          |"
   TIO.putStrLn "+===========================================+"
   TIO.putStrLn ""
+
+  -- Retry any pending contributions from previous sessions
+  retryPending config
 
   mainLoop config
 
@@ -49,15 +54,20 @@ mainLoop config = do
       TIO.putStrLn "Unknown option, try again."
       mainLoop config
 
--- | Full investigation flow: scan -> parse -> fetch wiki -> match -> Claude -> act -> learn
+-- | Full investigation flow: scan -> parse -> wiki -> match -> Claude -> act -> learn -> refactor
 runInvestigate :: AppConfig -> IO ()
 runInvestigate config = do
+  sessionRef <- newIORef emptySessionLog
+  identity <- agentIdentity
+
   -- Step 1: Scan the system
   TIO.putStrLn "\n-- Scanning system --\n"
   scanOutput <- scanSystem config
+  modifyIORef sessionRef (\s -> s { logScanOutput = scanOutput })
 
   -- Step 2: Parse findings
   let findings = parseFindings scanOutput
+  modifyIORef sessionRef (\s -> s { logFindings = findings })
   TIO.putStrLn $ "Found " <> T.pack (show (length findings)) <> " items of interest.\n"
 
   -- Step 3: Fetch wiki pages (graceful failure -> empty list)
@@ -74,20 +84,37 @@ runInvestigate config = do
   TIO.putStrLn $ T.pack (show (length novelFindings))
               <> " finding(s) not covered by wiki.\n"
 
-  -- Step 5: Call Claude
+  -- Step 5: Call Claude for investigation
   TIO.putStrLn "-- Asking Claude to analyze --\n"
   result <- investigate config scanOutput matched novelFindings
   case result of
     Left err -> TIO.putStrLn $ "Error: " <> T.pack (show err)
     Right advice -> do
+      modifyIORef sessionRef (\s -> s { logAdvice = Just advice })
+
       -- Step 6: Present analysis
       presentAdvice advice
 
-      -- Step 7: Offer cleanup actions
-      offerCleanup (adviceCleanupActions advice)
+      -- Step 7: Offer cleanup actions (tracking results in session)
+      offerCleanup sessionRef (adviceCleanupActions advice)
 
-      -- Step 8: Offer wiki contributions
-      offerLearn config wikiPages (adviceContributions advice)
+      -- Step 8: Session-aware learning — ask Claude to review the whole session
+      TIO.putStrLn "-- Learning from session --\n"
+      session <- readIORef sessionRef
+      learnResult <- callClaude config buildSystemPrompt (buildLearnPrompt session identity)
+      let allContribs = case learnResult of
+            Right text -> case parseAdvice text of
+              Right learnAdvice -> adviceContributions advice <> adviceContributions learnAdvice
+              Left _ -> adviceContributions advice
+            Left _ -> adviceContributions advice
+
+      -- Step 9: Offer wiki contributions
+      touchedPaths <- offerLearn config sessionRef wikiPages allContribs
+
+      -- Step 10: Refactoring loop
+      unless (null touchedPaths) $ do
+        TIO.putStrLn "-- Refactoring wiki --\n"
+        refactorLoop config wikiPages touchedPaths identity 0
 
 -- | Fetch wiki pages, returning empty list on any failure
 fetchWikiGracefully :: AppConfig -> IO [WikiPage]
@@ -110,15 +137,15 @@ presentAdvice advice = do
   TIO.putStrLn (adviceAnalysis advice)
   TIO.putStrLn ""
 
--- | Offer cleanup actions one by one, requiring confirmation
-offerCleanup :: [CleanupAction] -> IO ()
-offerCleanup [] = TIO.putStrLn "No cleanup actions suggested.\n"
-offerCleanup actions = do
+-- | Offer cleanup actions one by one, tracking results in the session log
+offerCleanup :: IORef SessionLog -> [CleanupAction] -> IO ()
+offerCleanup _ [] = TIO.putStrLn "No cleanup actions suggested.\n"
+offerCleanup sessionRef actions = do
   TIO.putStrLn $ "-- " <> T.pack (show (length actions)) <> " cleanup action(s) suggested --\n"
-  mapM_ offerOne actions
+  mapM_ (offerOne sessionRef) actions
   TIO.putStrLn ""
   where
-    offerOne action = do
+    offerOne ref action = do
       TIO.putStrLn $ "  Action:   " <> actionDescription action
       TIO.putStrLn $ "  Command:  " <> actionCommand action
       TIO.putStrLn $ "  Risk:     " <> actionRiskLevel action
@@ -126,7 +153,7 @@ offerCleanup actions = do
         Just est -> TIO.putStrLn $ "  Estimate: " <> est
         Nothing  -> pure ()
       case actionWikiRef action of
-        Just ref -> TIO.putStrLn $ "  Wiki ref: " <> ref
+        Just wref -> TIO.putStrLn $ "  Wiki ref: " <> wref
         Nothing  -> pure ()
 
       TIO.putStr "  Execute? [y/n] > "
@@ -136,28 +163,38 @@ offerCleanup actions = do
         "y" -> do
           result <- runCleanupAction action
           case result of
-            Right msg -> TIO.putStrLn $ "  OK: " <> msg
-            Left err  -> TIO.putStrLn $ "  Error: " <> err
-        _ -> TIO.putStrLn "  Skipped."
+            Right msg -> do
+              TIO.putStrLn $ "  OK: " <> msg
+              modifyIORef ref (`addEvent` ActionExecuted action msg)
+            Left err -> do
+              TIO.putStrLn $ "  Error: " <> err
+              modifyIORef ref (`addEvent` ActionFailed action err)
+        _ -> do
+          TIO.putStrLn "  Skipped."
+          modifyIORef ref (`addEvent` ActionSkipped action)
       TIO.putStrLn ""
 
--- | Offer wiki contributions for approval and push
-offerLearn :: AppConfig -> [WikiPage] -> [WikiContribution] -> IO ()
-offerLearn _ _ [] = TIO.putStrLn "No wiki contributions suggested.\n"
-offerLearn config pages contribs = do
+-- | Offer wiki contributions for approval and push. Returns paths that were pushed.
+offerLearn :: AppConfig -> IORef SessionLog -> [WikiPage] -> [WikiContribution] -> IO [FilePath]
+offerLearn _ _ _ [] = do
+  TIO.putStrLn "No wiki contributions suggested.\n"
+  pure []
+offerLearn config sessionRef pages contribs = do
   TIO.putStrLn $ "-- " <> T.pack (show (length contribs))
               <> " wiki contribution(s) suggested --\n"
-  mapM_ (offerOne config pages) contribs
+  pushed <- mapM (offerOne config sessionRef pages) contribs
   TIO.putStrLn ""
+  pure [p | Just p <- pushed]
   where
-    offerOne cfg pgs contrib = do
-      TIO.putStrLn $ "  Type:    " <> T.pack (show (contribType contrib))
-      TIO.putStrLn $ "  Path:    " <> T.pack (contribPath contrib)
-      TIO.putStrLn $ "  Summary: " <> contribSummary contrib
+    offerOne cfg ref pgs contrib = do
+      let prefixed = contrib { contribSummary = prefixCommitMsg (contribSummary contrib) }
+      TIO.putStrLn $ "  Type:    " <> T.pack (show (contribType prefixed))
+      TIO.putStrLn $ "  Path:    " <> T.pack (contribPath prefixed)
+      TIO.putStrLn $ "  Summary: " <> contribSummary prefixed
       TIO.putStrLn "  Preview:"
-      let previewLines = take 10 (T.lines (contribContent contrib))
+      let previewLines = take 10 (T.lines (contribContent prefixed))
       mapM_ (\l -> TIO.putStrLn $ "    " <> l) previewLines
-      when (length (T.lines (contribContent contrib)) > 10) $
+      when (length (T.lines (contribContent prefixed)) > 10) $
         TIO.putStrLn "    ..."
 
       TIO.putStr "  Push to wiki? [y/n] > "
@@ -165,15 +202,98 @@ offerLearn config pages contribs = do
       answer <- getLine
       case answer of
         "y" -> do
-          result <- pushContribution cfg pgs contrib
+          result <- pushContribution cfg pgs prefixed
           case result of
-            Right () -> TIO.putStrLn "  OK: Contribution pushed to wiki."
+            Right () -> do
+              TIO.putStrLn "  OK: Contribution pushed to wiki."
+              modifyIORef ref (`addEvent` ContribPushed prefixed)
+              pure (Just (contribPath prefixed))
             Left err -> do
               TIO.putStrLn $ "  Error: " <> T.pack (show err)
               TIO.putStrLn "  Saving to ~/.diskwise/pending/ for next session."
-              savePending contrib
-        _ -> TIO.putStrLn "  Skipped."
-      TIO.putStrLn ""
+              savePending prefixed
+              modifyIORef ref (`addEvent` ContribFailed prefixed (T.pack (show err)))
+              pure Nothing
+        _ -> do
+          TIO.putStrLn "  Skipped."
+          pure Nothing
+
+-- | Refactoring loop: review touched + surrounding pages, improve until convergence
+refactorLoop :: AppConfig -> [WikiPage] -> [FilePath] -> T.Text -> Int -> IO ()
+refactorLoop config allPages touchedPaths identity passNum = do
+  let maxPasses = 5 :: Int
+  if passNum >= maxPasses
+    then TIO.putStrLn "  Max refactoring passes reached."
+    else do
+      TIO.putStrLn $ "  Refactoring pass " <> T.pack (show (passNum + 1)) <> "..."
+      result <- proposeRefactoring config allPages touchedPaths identity
+      case result of
+        Left err -> TIO.putStrLn $ "  Refactoring error: " <> T.pack (show err)
+        Right refResult -> do
+          TIO.putStrLn $ "  " <> refactorSummary refResult
+          if refactorDone refResult || null (refactorContributions refResult)
+            then TIO.putStrLn "  Wiki converged — no more improvements needed.\n"
+            else do
+              -- Push each refactoring contribution
+              mapM_ (pushRefactorContrib config allPages) (refactorContributions refResult)
+              let newTouched = touchedPaths <>
+                    map contribPath (refactorContributions refResult)
+              -- Re-fetch pages for next pass
+              freshPages <- fetchWikiGracefully config
+              refactorLoop config freshPages newTouched identity (passNum + 1)
+
+-- | Push a refactoring contribution (auto-approved, no user prompt)
+pushRefactorContrib :: AppConfig -> [WikiPage] -> WikiContribution -> IO ()
+pushRefactorContrib config pages contrib = do
+  let prefixed = contrib { contribSummary = prefixCommitMsg (contribSummary contrib) }
+  result <- pushContribution config pages prefixed
+  case result of
+    Right () -> TIO.putStrLn $ "    Pushed: " <> T.pack (contribPath prefixed)
+    Left err -> TIO.putStrLn $ "    Failed: " <> T.pack (contribPath prefixed)
+                             <> " — " <> T.pack (show err)
+
+-- | Retry pending contributions from previous sessions
+retryPending :: AppConfig -> IO ()
+retryPending config = do
+  home <- getHomeDirectory
+  let pendingDir = home <> "/.diskwise/pending"
+  exists <- doesDirectoryExist pendingDir
+  if not exists
+    then pure ()
+    else do
+      files <- listDirectory pendingDir
+        `catch` (\(_ :: SomeException) -> pure [])
+      unless (null files) $ do
+        TIO.putStrLn $ "Retrying " <> T.pack (show (length files))
+                    <> " pending contribution(s) from previous session..."
+        wikiPages <- fetchWikiGracefully config
+        mapM_ (retryOne config wikiPages pendingDir) files
+        TIO.putStrLn ""
+
+-- | Retry a single pending contribution file
+retryOne :: AppConfig -> [WikiPage] -> FilePath -> FilePath -> IO ()
+retryOne config pages pendingDir filename = do
+  let fullPath = pendingDir <> "/" <> filename
+      wikiPath = map (\c -> if c == '_' then '/' else c) filename
+  content <- TIO.readFile fullPath
+    `catch` (\(_ :: SomeException) -> pure "")
+  if T.null content
+    then pure ()
+    else do
+      let contrib = WikiContribution
+            { contribType    = CreatePage
+            , contribPath    = wikiPath
+            , contribContent = content
+            , contribSummary = prefixCommitMsg ("retry pending: " <> T.pack wikiPath)
+            }
+      result <- pushContribution config pages contrib
+      case result of
+        Right () -> do
+          TIO.putStrLn $ "  Retried OK: " <> T.pack wikiPath
+          removeFile fullPath
+        Left err ->
+          TIO.putStrLn $ "  Still failing: " <> T.pack wikiPath
+                      <> " — " <> T.pack (show err)
 
 -- | Save a failed contribution locally for retry
 savePending :: WikiContribution -> IO ()
@@ -186,7 +306,11 @@ savePending contrib = do
   where
     sanitizeFilename = map (\c -> if c == '/' then '_' else c)
 
--- | Control.Monad.when (re-implemented to avoid import)
+-- helpers
+
 when :: Bool -> IO () -> IO ()
 when True  action = action
 when False _      = pure ()
+
+unless :: Bool -> IO () -> IO ()
+unless b = when (not b)
