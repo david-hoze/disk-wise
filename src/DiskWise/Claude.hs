@@ -17,6 +17,7 @@ module DiskWise.Claude
   , agentIdentity
   , prefixCommitMsg
   , prefixGardenerMsg
+  , extractJson
   ) where
 
 import Control.Exception (catch, SomeException, try)
@@ -29,11 +30,14 @@ import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Header (hContentType)
 import Network.HTTP.Types.Status (statusCode)
-import System.Environment (lookupEnv)
+import qualified Data.ByteString as BS
+import System.Directory (getTemporaryDirectory, removeFile)
+import System.FilePath ((</>))
 import System.Exit (ExitCode(..))
 import System.Process (readCreateProcessWithExitCode, readProcess, proc, shell)
 
 import DiskWise.Types
+import DiskWise.Scanner (toMingwPath)
 
 -- | Generate an agent identity string for wiki History sections
 -- Uses a hash of the machine's hostname for privacy
@@ -98,21 +102,37 @@ callClaudeGarden config sysPrompt userPrompt = do
 -- Uses sh -c to invoke claude, which handles PATH resolution on all platforms
 callClaudeCode :: Maybe T.Text -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
 callClaudeCode modelOverride sysPrompt userPrompt = do
+  -- Unset CLAUDECODE in shell commands to allow invocation from within Claude Code
+  let unsetPrefix = "unset CLAUDECODE; "
   -- First check claude is available
-  checkResult <- try $ readProcess "sh" ["-c", "claude --version 2>/dev/null"] ""
+  checkResult <- try $ readProcess "sh" ["-c", unsetPrefix <> "claude --version 2>/dev/null"] ""
     :: IO (Either SomeException String)
   case checkResult of
     Left e -> pure (Left (ClaudeError ("Claude CLI not found: " <> T.pack (show e))))
     Right v | null v -> pure (Left (ClaudeError "Claude CLI not found"))
     Right _ -> do
-      -- Use shell to invoke claude (handles PATH on MINGW/Windows)
+      -- Write combined prompt to temp file to avoid command-line length limits
+      -- and Unicode encoding issues on Windows.
+      -- Use Windows temp dir for writing (GHC is a Windows binary),
+      -- then convert to MINGW path for the shell command.
+      tmpDir <- getTemporaryDirectory
+      let winPromptFile = tmpDir </> "diskwise-prompt.txt"
+          promptFile = toMingwPath winPromptFile
+          combined = T.unlines
+            [ "== SYSTEM INSTRUCTIONS =="
+            , sysPrompt
+            , ""
+            , "== YOUR TASK =="
+            , userPrompt
+            ]
+      BS.writeFile winPromptFile (TE.encodeUtf8 combined)
       let modelFlag = case modelOverride of
             Just m  -> " --model " <> shellQuote (T.unpack m)
             Nothing -> ""
-          cmd = "claude --print" <> modelFlag
-                <> " --system-prompt " <> shellQuote (T.unpack sysPrompt)
-                <> " " <> shellQuote (T.unpack userPrompt)
-      result <- try $ readCreateProcessWithExitCode (shell cmd) ""
+          cmd = unsetPrefix <> "claude --print" <> modelFlag
+                <> " < " <> shellQuote promptFile
+      result <- try $ readCreateProcessWithExitCode (proc "sh" ["-c", cmd]) ""
+      removeFile winPromptFile `catch` (\(_ :: SomeException) -> pure ())
       case result of
         Left (e :: SomeException) ->
           pure (Left (ClaudeError ("Claude CLI failed: " <> T.pack (show e))))
@@ -393,18 +413,17 @@ parseRefactorResult text =
     Left err -> Left (ParseError ("Failed to parse refactor response: " <> T.pack err))
     Right val -> parseRefactorValue val
 
--- | Extract JSON from text that might be wrapped in markdown code blocks
+-- | Extract JSON from text that might be wrapped in markdown code blocks.
+-- The response is always a JSON object, so we extract from the first { to
+-- the last }. This avoids issues with ``` appearing inside JSON strings
+-- (e.g., wiki contributions containing markdown code blocks).
 extractJson :: T.Text -> T.Text
-extractJson text
-  | "```json" `T.isInfixOf` text =
-      let afterStart = T.drop 1 $ T.dropWhile (/= '\n') $ snd $ T.breakOn "```json" text
-          beforeEnd = fst $ T.breakOn "```" afterStart
-      in T.strip beforeEnd
-  | "```" `T.isInfixOf` text =
-      let afterStart = T.drop 1 $ T.dropWhile (/= '\n') $ snd $ T.breakOn "```" text
-          beforeEnd = fst $ T.breakOn "```" afterStart
-      in T.strip beforeEnd
-  | otherwise = T.strip text
+extractJson text =
+  let afterOpen = T.dropWhile (/= '{') text
+      beforeClose = T.dropWhileEnd (/= '}') afterOpen
+  in if T.null afterOpen || T.null beforeClose
+     then T.strip text
+     else beforeClose
 
 -- | Parse a JSON Value into ClaudeAdvice
 parseAdviceValue :: Value -> Either DiskWiseError ClaudeAdvice

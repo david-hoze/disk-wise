@@ -9,7 +9,7 @@ import DiskWise.Types
 import DiskWise.Claude (buildPrompt, buildSystemPrompt, buildLearnPrompt,
                         buildGardenSystemPrompt, buildGardenPrompt,
                         parseAdvice, parseRefactorResult,
-                        prefixCommitMsg, prefixGardenerMsg)
+                        prefixCommitMsg, prefixGardenerMsg, extractJson)
 
 spec :: Spec
 spec = do
@@ -113,6 +113,29 @@ spec = do
 
     it "does not double-prefix" $
       prefixCommitMsg "diskwise-agent: add npm page" `shouldBe` "diskwise-agent: add npm page"
+
+  describe "extractJson" $ do
+    it "extracts plain JSON" $ do
+      extractJson "{\"key\": \"value\"}" `shouldBe` "{\"key\": \"value\"}"
+
+    it "extracts JSON from markdown code blocks" $ do
+      let wrapped = T.unlines
+            [ "Here is the result:"
+            , "```json"
+            , "{\"key\": \"value\"}"
+            , "```"
+            ]
+      extractJson wrapped `shouldBe` "{\"key\": \"value\"}"
+
+    it "handles code blocks containing triple backticks in strings" $ do
+      let wrapped = T.unlines
+            [ "```json"
+            , "{\"content\": \"# Title\\n```bash\\necho hi\\n```\\nDone.\"}"
+            , "```"
+            ]
+      extractJson wrapped `shouldSatisfy` T.isInfixOf "echo hi"
+      -- The extracted text should be valid JSON (starts with {, ends with })
+      extractJson wrapped `shouldSatisfy` (\t -> T.head t == '{' && T.last t == '}')
 
   describe "parseAdvice" $ do
     it "parses valid JSON response" $ do
