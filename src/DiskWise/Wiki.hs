@@ -22,6 +22,8 @@ module DiskWise.Wiki
   , PageMeta(..)
   , defaultPageMeta
   , deduplicateContribs
+  , isRedirectPage
+  , extractMarkdownLinks
   ) where
 
 import Control.Concurrent (threadDelay)
@@ -354,10 +356,65 @@ recordOutcome config pages wikiRef success = do
     [] -> pure ()
   `catch` (\(_ :: SomeException) -> pure ())
 
+-- | Detect if a page body is a redirect stub.
+-- A redirect has <= 5 non-empty lines and contains a markdown link to a .md file.
+-- Returns the target path if the page is a redirect.
+isRedirectPage :: T.Text -> Maybe FilePath
+isRedirectPage body =
+  let nonEmpty = filter (not . T.null . T.strip) (T.lines body)
+  in if length nonEmpty <= 5
+     then extractRedirectTarget body
+     else Nothing
+
+-- | Extract redirect target from markdown link like [text](../path.md) or [text](path.md)
+extractRedirectTarget :: T.Text -> Maybe FilePath
+extractRedirectTarget body =
+  let links = concatMap extractMarkdownLinks (T.lines body)
+      mdLinks = filter (T.isSuffixOf ".md") links
+  in case mdLinks of
+    (target:_) -> Just (T.unpack (resolveRelativePath target))
+    [] -> Nothing
+
+-- | Extract href from markdown links: [text](href)
+extractMarkdownLinks :: T.Text -> [T.Text]
+extractMarkdownLinks line = go line
+  where
+    go t =
+      case T.breakOn "](" t of
+        (_, rest)
+          | T.null rest -> []
+          | otherwise ->
+              let afterBracket = T.drop 2 rest  -- skip ](
+                  (href, remaining) = T.breakOn ")" afterBracket
+              in if T.null remaining
+                 then []
+                 else href : go (T.drop 1 remaining)
+
+-- | Resolve relative path (strip leading ../ and normalize)
+resolveRelativePath :: T.Text -> T.Text
+resolveRelativePath = T.replace "\\" "/" . stripDotDot
+  where
+    stripDotDot t
+      | T.isPrefixOf "../" t = stripDotDot (T.drop 3 t)
+      | T.isPrefixOf "./"  t = stripDotDot (T.drop 2 t)
+      | otherwise            = t
+
+-- | Resolve a contribution through redirects: if the target page is a redirect
+-- stub, rewrite the contribution to point at the redirect's target instead.
+resolveRedirect :: [WikiPage] -> WikiContribution -> WikiContribution
+resolveRedirect pages contrib =
+  case filter (\p -> pageRelPath p == contribPath contrib) pages of
+    (page:_) -> case isRedirectPage (pageBody page) of
+      Just target -> contrib { contribPath = target }
+      Nothing -> contrib
+    [] -> contrib
+
 -- | Deduplicate contributions: convert CreatePage to AmendPage when the path
 -- already exists in the wiki, appending the new content to the existing body.
+-- Also resolves redirects: if a contribution targets a redirect page, it is
+-- rewritten to target the redirect's destination before deduplication.
 deduplicateContribs :: [WikiPage] -> [WikiContribution] -> [WikiContribution]
-deduplicateContribs pages = map dedup
+deduplicateContribs pages = map (dedup . resolveRedirect pages)
   where
     existingPaths = map pageRelPath pages
     dedup contrib

@@ -65,9 +65,10 @@ prefixCommitMsg msg
 -- | Call Claude to investigate disk usage with wiki context
 investigate :: AppConfig -> T.Text -> [(WikiPage, [Finding])] -> [Finding]
            -> [CommandStats] -> [(FilePath, Integer)] -> [WikiPage] -> [WikiPage]
+           -> Maybe [Integer]
            -> IO (Either DiskWiseError ClaudeAdvice)
-investigate config scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages = do
-  let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages
+investigate config scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages diminishing = do
+  let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages diminishing
       sysPrompt = buildSystemPrompt
   result <- callClaude config sysPrompt userPrompt
   case result of
@@ -276,6 +277,16 @@ buildSystemPrompt = T.unlines
   , "- If a wiki page documents that a command fails on the current platform and"
   , "  provides an alternative command, propose the alternative as a cleanup action."
   , "  Do NOT omit the cleanup just because the original approach is unreliable."
+  , "- When interpreting skip patterns: \"too risky\" and \"not applicable\" are clear"
+  , "  signals. But \"not now\" (the default) is AMBIGUOUS — the user may want the"
+  , "  cleanup but with more granularity, better targeting, or at a different time."
+  , "  Do NOT treat repeated \"not now\" skips as permanent user preferences."
+  , "  Instead, consider whether the action could be improved (e.g., showing sizes"
+  , "  per subdirectory before bulk deletion)."
+  , "- When multiple directories of the same type appear in scan output (e.g.,"
+  , "  multiple dist-newstyle dirs), propose INDIVIDUAL cleanup actions for each"
+  , "  rather than a single bulk find-exec command. This lets users selectively"
+  , "  clean per-project. Include per-directory size estimates from the scan data."
   , ""
   , "When contributing to the wiki, focus on OBSERVATIONS FROM THIS SPECIFIC SYSTEM:"
   , "- Actual sizes you measured (not typical ranges from general knowledge)"
@@ -309,13 +320,14 @@ buildSystemPrompt = T.unlines
 
 -- | Build the user message with scan output + wiki context + novel findings
 buildPrompt :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> T.Text
-buildPrompt scanOutput matchedPages novelFindings = buildPromptWith scanOutput matchedPages novelFindings [] [] [] []
+buildPrompt scanOutput matchedPages novelFindings = buildPromptWith scanOutput matchedPages novelFindings [] [] [] [] Nothing
 
 -- | Build prompt with optional command reliability stats, previously cleaned paths,
--- cross-cutting observation pages, and full wiki page listing for duplicate prevention
+-- cross-cutting observation pages, full wiki page listing for duplicate prevention,
+-- and diminishing returns data
 buildPromptWith :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> [CommandStats]
-               -> [(FilePath, Integer)] -> [WikiPage] -> [WikiPage] -> T.Text
-buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages = T.unlines $
+               -> [(FilePath, Integer)] -> [WikiPage] -> [WikiPage] -> Maybe [Integer] -> T.Text
+buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages diminishing = T.unlines $
   [ "== SCAN OUTPUT =="
   , scanOutput
   , ""
@@ -352,8 +364,22 @@ buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned obser
         , "Before proposing a CreatePage, check this list. If a page on a similar topic"
         , "exists, use AmendPage to add to it instead."
         ] <> map formatPageListing allPages <> [""]
+  ) <>
+  (case diminishing of
+    Just freed ->
+      [ "== DIMINISHING RETURNS =="
+      , "The last 3 sessions freed: " <> T.intercalate ", " (map formatMB freed) <> " — all under 10 MB."
+      , "Cache-based cleanups have reached diminishing returns on this system."
+      , "Instead of proposing cache cleanups that will free near-zero space:"
+      , "- Focus on structural observations (large directories the user could reorganize)"
+      , "- Mention in the analysis that safe automated cleanup has been exhausted"
+      , "- Only propose cleanup_actions if they would free meaningful space (> 50 MB)"
+      , ""
+      ]
+    Nothing -> []
   )
   where
+    formatMB b = T.pack (show (b `div` (1024 * 1024))) <> " MB"
     formatPageListing page =
       "- " <> T.pack (pageRelPath page) <> " — " <> pageTitle page
     formatObservationPage page =
@@ -380,8 +406,8 @@ formatOutcomeHistory page
         <> T.pack (show (pageFailCount page)) <> " failed" ]
 
 -- | Build a learning prompt that includes the full session history
-buildLearnPrompt :: SessionLog -> T.Text -> T.Text -> [WikiPage] -> T.Text
-buildLearnPrompt sessionLog identity historyContext allPages =
+buildLearnPrompt :: SessionLog -> T.Text -> T.Text -> [WikiPage] -> Maybe [Integer] -> T.Text
+buildLearnPrompt sessionLog identity historyContext allPages diminishing =
   let plat = logPlatform sessionLog
   in T.unlines $
   [ "== SESSION REVIEW =="
@@ -419,6 +445,18 @@ buildLearnPrompt sessionLog identity historyContext allPages =
         , "Before proposing a CreatePage, check this list. If a page on a similar topic"
         , "exists, use AmendPage to add to it instead."
         ] <> map formatLearnPageListing allPages <> [""]
+  ) <>
+  (case diminishing of
+    Just freed ->
+      [ "== DIMINISHING RETURNS =="
+      , "The last 3 sessions freed: " <> T.intercalate ", "
+          (map (\b -> T.pack (show (b `div` (1024 * 1024))) <> " MB") freed)
+        <> " — all under 10 MB."
+      , "Cache-based cleanups have reached diminishing returns on this system."
+      , "Document this pattern in relevant wiki pages if not already noted."
+      , ""
+      ]
+    Nothing -> []
   ) <>
   [ "USER FEEDBACK IS THE HIGHEST-VALUE SIGNAL. If the user reported a problem:"
   , "1. Identify which cleanup action likely caused it."

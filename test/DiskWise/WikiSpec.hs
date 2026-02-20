@@ -8,7 +8,7 @@ import Test.Hspec
 import DiskWise.Types
 import DiskWise.WikiRouter (matchPages, matchPagesHeuristic, parsePagePatterns, parsePageToolNames,
                             parseMetaComment, renderMetaComment, stripMetaLines, PageMeta(..),
-                            deduplicateContribs)
+                            deduplicateContribs, isRedirectPage, extractMarkdownLinks)
 
 -- | Helper to make a wiki page for testing
 mkPage :: FilePath -> T.Text -> T.Text -> T.Text -> WikiPage
@@ -208,3 +208,71 @@ spec = do
     it "leaves content without meta lines unchanged" $ do
       let content = "# Page Title\nSome content.\n"
       stripMetaLines content `shouldSatisfy` T.isInfixOf "# Page Title"
+
+  describe "isRedirectPage" $ do
+    it "returns Just target for a redirect stub" $ do
+      let body = T.unlines
+            [ "# Do Not Suggest"
+            , ""
+            , "See: [User Kept Files](../exclusions/user-kept-files.md)"
+            ]
+      isRedirectPage body `shouldBe` Just "exclusions/user-kept-files.md"
+
+    it "returns Nothing for a real page with content" $ do
+      let body = T.unlines
+            [ "# npm"
+            , ""
+            , "## Where it stores data"
+            , "- `~/.npm/_cacache`"
+            , "- `~/.npm/_logs`"
+            , ""
+            , "## Cleanup commands"
+            , "Run `npm cache clean --force`"
+            , ""
+            , "## History"
+            , "- 2026-02-20: Added npm docs"
+            ]
+      isRedirectPage body `shouldBe` Nothing
+
+  describe "extractMarkdownLinks" $ do
+    it "extracts href from [text](href) syntax" $ do
+      let line = "See: [User Kept Files](../exclusions/user-kept-files.md)"
+      extractMarkdownLinks line `shouldBe` ["../exclusions/user-kept-files.md"]
+
+    it "extracts multiple links from one line" $ do
+      let line = "See [A](a.md) and [B](b.md)"
+      extractMarkdownLinks line `shouldBe` ["a.md", "b.md"]
+
+    it "returns empty for lines without links" $ do
+      extractMarkdownLinks "No links here" `shouldBe` []
+
+  describe "deduplicateContribs with redirects" $ do
+    it "follows redirect: CreatePage for redirect path becomes AmendPage for target" $ do
+      let redirectPage = mkPage "do-not-suggest.md" "do-not-suggest" "Do Not Suggest"
+                           "# Do Not Suggest\n\nSee: [User Kept Files](../exclusions/user-kept-files.md)\n"
+          targetPage = mkPage "exclusions/user-kept-files.md" "user-kept-files" "User Kept Files"
+                         "# User Kept Files\nExisting content about kept files"
+          contrib = WikiContribution
+            { contribType    = CreatePage
+            , contribPath    = "do-not-suggest.md"
+            , contribContent = "New content about do not suggest"
+            , contribSummary = "add do-not-suggest"
+            }
+          [result] = deduplicateContribs [redirectPage, targetPage] [contrib]
+      contribType result `shouldBe` AmendPage
+      contribPath result `shouldBe` "exclusions/user-kept-files.md"
+      contribContent result `shouldSatisfy` T.isInfixOf "Existing content about kept files"
+      contribContent result `shouldSatisfy` T.isInfixOf "New content about do not suggest"
+
+    it "does not redirect for non-redirect pages" $ do
+      let normalPage = mkPage "tools/npm.md" "npm" "npm"
+                         "# npm\n\n## Where it stores data\n- `~/.npm`\n\n## Cleanup\nRun npm cache clean\n"
+          contrib = WikiContribution
+            { contribType    = CreatePage
+            , contribPath    = "tools/npm.md"
+            , contribContent = "More npm info"
+            , contribSummary = "update npm"
+            }
+          [result] = deduplicateContribs [normalPage] [contrib]
+      contribType result `shouldBe` AmendPage
+      contribPath result `shouldBe` "tools/npm.md"

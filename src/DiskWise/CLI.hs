@@ -22,7 +22,8 @@ import DiskWise.Claude (investigate, callClaude, buildSystemPrompt, buildLearnPr
                         parseAdvice, agentIdentity, prefixCommitMsg, formatCommandStats)
 import DiskWise.Scanner
 import DiskWise.History (saveSessionSummary, loadSessionHistory, loadMostRecentSummary,
-                         summarizeSession, formatSessionHistory, computeCommandStats)
+                         summarizeSession, formatSessionHistory, computeCommandStats,
+                         detectDiminishingReturns)
 
 -- | Main application entry point
 runApp :: AppConfig -> IO ()
@@ -106,7 +107,8 @@ runInvestigate config = do
   TIO.putStrLn "-- Asking Claude to analyze --\n"
   let cmdStats = computeCommandStats history
       prevCleaned = maybe [] summaryCleanedPaths prevSummary
-  result <- investigate config scanOutput matched novelFindings cmdStats prevCleaned observationPages wikiPages
+      diminishing = detectDiminishingReturns history
+  result <- investigate config scanOutput matched novelFindings cmdStats prevCleaned observationPages wikiPages diminishing
   case result of
     Left err -> TIO.putStrLn $ "Error: " <> T.pack (show err)
     Right advice -> do
@@ -129,7 +131,7 @@ runInvestigate config = do
                        <> (if T.null regrowthReport then "" else "\n" <> regrowthReport)
                        <> (if T.null cmdStatsText then "" else "\n" <> cmdStatsText)
       learnResult <- callClaude config buildSystemPrompt
-        (buildLearnPrompt session identity historyContext wikiPages)
+        (buildLearnPrompt session identity historyContext wikiPages diminishing)
       let allContribs = case learnResult of
             Right text -> case parseAdvice text of
               Right learnAdvice -> adviceContributions advice <> adviceContributions learnAdvice

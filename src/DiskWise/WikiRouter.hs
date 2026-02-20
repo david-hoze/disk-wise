@@ -21,6 +21,8 @@ module DiskWise.WikiRouter
   , PageMeta(..)
   , defaultPageMeta
   , deduplicateContribs
+  , isRedirectPage
+  , extractMarkdownLinks
   ) where
 
 import qualified Data.Text as T
@@ -72,6 +74,12 @@ defaultPageMeta = Wiki.defaultPageMeta
 
 deduplicateContribs :: [WikiPage] -> [WikiContribution] -> [WikiContribution]
 deduplicateContribs = Wiki.deduplicateContribs
+
+isRedirectPage :: T.Text -> Maybe FilePath
+isRedirectPage = Wiki.isRedirectPage
+
+extractMarkdownLinks :: T.Text -> [T.Text]
+extractMarkdownLinks = Wiki.extractMarkdownLinks
 
 -- Routed functions: delegate to Wiki or WikiGist based on config
 

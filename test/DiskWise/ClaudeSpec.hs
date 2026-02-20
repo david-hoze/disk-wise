@@ -3,6 +3,8 @@
 module DiskWise.ClaudeSpec (spec) where
 
 import qualified Data.Text as T
+import Data.Time.Clock (UTCTime(..))
+import Data.Time.Calendar (fromGregorian)
 import Test.Hspec
 
 import DiskWise.Types
@@ -11,6 +13,7 @@ import DiskWise.Claude (buildPrompt, buildPromptWith, buildSystemPrompt,
                         buildGardenSystemPrompt, buildGardenPrompt,
                         parseAdvice, parseRefactorResult,
                         prefixCommitMsg, prefixGardenerMsg, extractJson)
+import DiskWise.History (formatSessionHistory)
 
 spec :: Spec
 spec = do
@@ -59,6 +62,16 @@ spec = do
       prompt `shouldSatisfy` T.isInfixOf "alternative command"
       prompt `shouldSatisfy` T.isInfixOf "Do NOT omit the cleanup just because the original approach is unreliable"
 
+    it "includes 'not now' ambiguity guidance" $ do
+      let prompt = buildSystemPrompt
+      prompt `shouldSatisfy` T.isInfixOf "AMBIGUOUS"
+      prompt `shouldSatisfy` T.isInfixOf "not now"
+
+    it "includes INDIVIDUAL cleanup actions guidance" $ do
+      let prompt = buildSystemPrompt
+      prompt `shouldSatisfy` T.isInfixOf "INDIVIDUAL cleanup actions"
+      prompt `shouldSatisfy` T.isInfixOf "per-project"
+
   describe "buildPrompt" $ do
     it "includes scan output" $ do
       let prompt = buildPrompt "scan data here" [] []
@@ -99,40 +112,40 @@ spec = do
   describe "buildPromptWith previously cleaned paths" $ do
     it "includes PREVIOUSLY CLEANED section when paths are non-empty" $ do
       let prompt = buildPromptWith "scan output" [] [] []
-                     [("/home/.npm", 524288000), ("/home/.cache", 1073741824)] [] []
+                     [("/home/.npm", 524288000), ("/home/.cache", 1073741824)] [] [] Nothing
       prompt `shouldSatisfy` T.isInfixOf "PREVIOUSLY CLEANED"
       prompt `shouldSatisfy` T.isInfixOf "/home/.npm"
       prompt `shouldSatisfy` T.isInfixOf "/home/.cache"
 
     it "omits PREVIOUSLY CLEANED section when paths are empty" $ do
-      let prompt = buildPromptWith "scan output" [] [] [] [] [] []
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing
       prompt `shouldSatisfy` (not . T.isInfixOf "PREVIOUSLY CLEANED")
 
   describe "buildPromptWith observation pages" $ do
     it "includes CROSS-CUTTING WIKI RULES when observation pages are non-empty" $ do
       let obsPage = WikiPage "observations/skip-patterns-windows.md" "skip-patterns"
                       "Skip Patterns" "Do NOT delete .blend files" "sha" Nothing 0 0
-          prompt = buildPromptWith "scan output" [] [] [] [] [obsPage] []
+          prompt = buildPromptWith "scan output" [] [] [] [] [obsPage] [] Nothing
       prompt `shouldSatisfy` T.isInfixOf "CROSS-CUTTING WIKI RULES"
       prompt `shouldSatisfy` T.isInfixOf "HARD CONSTRAINTS"
       prompt `shouldSatisfy` T.isInfixOf "Do NOT delete .blend files"
       prompt `shouldSatisfy` T.isInfixOf "observations/skip-patterns-windows.md"
 
     it "omits CROSS-CUTTING WIKI RULES when observation pages are empty" $ do
-      let prompt = buildPromptWith "scan output" [] [] [] [] [] []
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing
       prompt `shouldSatisfy` (not . T.isInfixOf "CROSS-CUTTING WIKI RULES")
 
   describe "buildPromptWith existing wiki pages" $ do
     it "includes EXISTING WIKI PAGES when allPages is non-empty" $ do
       let page = WikiPage "tools/npm.md" "npm" "npm cleanup"
                    "# npm" "sha" Nothing 0 0
-          prompt = buildPromptWith "scan output" [] [] [] [] [] [page]
+          prompt = buildPromptWith "scan output" [] [] [] [] [] [page] Nothing
       prompt `shouldSatisfy` T.isInfixOf "EXISTING WIKI PAGES"
       prompt `shouldSatisfy` T.isInfixOf "tools/npm.md"
       prompt `shouldSatisfy` T.isInfixOf "npm cleanup"
 
     it "omits EXISTING WIKI PAGES when allPages is empty" $ do
-      let prompt = buildPromptWith "scan output" [] [] [] [] [] []
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing
       prompt `shouldSatisfy` (not . T.isInfixOf "EXISTING WIKI PAGES")
 
   describe "buildLearnPrompt" $ do
@@ -143,26 +156,26 @@ spec = do
           session = (emptySessionLog { logScanOutput = "scan" })
                       `addEvent` ActionExecuted okOutcome
                       `addEvent` ActionFailed failOutcome
-          prompt = buildLearnPrompt session "agent@test" "" []
+          prompt = buildLearnPrompt session "agent@test" "" [] Nothing
       prompt `shouldSatisfy` T.isInfixOf "EXECUTED"
       prompt `shouldSatisfy` T.isInfixOf "cleaned 500MB"
       prompt `shouldSatisfy` T.isInfixOf "FAILED"
       prompt `shouldSatisfy` T.isInfixOf "permission denied"
 
     it "includes agent identity" $ do
-      let prompt = buildLearnPrompt emptySessionLog "agent@myhost" "" []
+      let prompt = buildLearnPrompt emptySessionLog "agent@myhost" "" [] Nothing
       prompt `shouldSatisfy` T.isInfixOf "agent@myhost"
 
     it "includes EXISTING WIKI PAGES when pages are provided" $ do
       let page = WikiPage "platform/mingw64-temp-files.md" "temp" "MinGW64 Temp Files"
                    "# Temp" "sha" Nothing 0 0
-          prompt = buildLearnPrompt emptySessionLog "agent@test" "" [page]
+          prompt = buildLearnPrompt emptySessionLog "agent@test" "" [page] Nothing
       prompt `shouldSatisfy` T.isInfixOf "EXISTING WIKI PAGES"
       prompt `shouldSatisfy` T.isInfixOf "platform/mingw64-temp-files.md"
       prompt `shouldSatisfy` T.isInfixOf "MinGW64 Temp Files"
 
     it "omits EXISTING WIKI PAGES when no pages" $ do
-      let prompt = buildLearnPrompt emptySessionLog "agent@test" "" []
+      let prompt = buildLearnPrompt emptySessionLog "agent@test" "" [] Nothing
       prompt `shouldSatisfy` (not . T.isInfixOf "EXISTING WIKI PAGES")
 
   describe "buildGardenSystemPrompt" $ do
@@ -326,3 +339,39 @@ spec = do
       case parseRefactorResult json of
         Right r -> refactorDone r `shouldBe` True
         Left err -> expectationFailure $ "Parse failed: " <> show err
+
+  describe "buildPromptWith diminishing returns" $ do
+    it "includes DIMINISHING RETURNS when Just" $ do
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] (Just [0, 0, 0])
+      prompt `shouldSatisfy` T.isInfixOf "DIMINISHING RETURNS"
+      prompt `shouldSatisfy` T.isInfixOf "all under 10 MB"
+
+    it "omits DIMINISHING RETURNS when Nothing" $ do
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing
+      prompt `shouldSatisfy` (not . T.isInfixOf "DIMINISHING RETURNS")
+
+  describe "buildLearnPrompt diminishing returns" $ do
+    it "includes DIMINISHING RETURNS when Just" $ do
+      let prompt = buildLearnPrompt emptySessionLog "agent@test" "" [] (Just [0, 0, 0])
+      prompt `shouldSatisfy` T.isInfixOf "DIMINISHING RETURNS"
+
+    it "omits DIMINISHING RETURNS when Nothing" $ do
+      let prompt = buildLearnPrompt emptySessionLog "agent@test" "" [] Nothing
+      prompt `shouldSatisfy` (not . T.isInfixOf "DIMINISHING RETURNS")
+
+  describe "formatSessionHistory skip pattern guidance" $ do
+    it "includes AMBIGUOUS guidance for not-now skips" $ do
+      let summary = SessionSummary
+            { summaryTimestamp     = UTCTime (fromGregorian 2026 2 20) 0
+            , summaryPlatform      = PlatformInfo "linux" "x86_64" "bash"
+            , summaryFindingCount  = 1
+            , summaryActionsRun    = 0
+            , summaryActionsFailed = 0
+            , summarySkipReasons   = [("Remove dist-newstyle", NotNow)]
+            , summaryBytesFreed    = Nothing
+            , summaryUserFeedback  = Nothing
+            , summaryFailedCmds    = []
+            , summaryCleanedPaths  = []
+            , summarySucceededCmds = []
+            }
+      formatSessionHistory [summary] `shouldSatisfy` T.isInfixOf "AMBIGUOUS"

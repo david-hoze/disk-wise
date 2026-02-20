@@ -9,6 +9,7 @@ module DiskWise.History
   , formatSessionHistory
   , computeSkipPatterns
   , computeCommandStats
+  , detectDiminishingReturns
   ) where
 
 import Control.Exception (catch, SomeException)
@@ -120,7 +121,9 @@ formatSessionHistory summaries =
       , "- If the reason is \"not applicable\": the matching may be wrong, or the page"
       , "  needs better platform notes."
       , "- If the reason is \"already handled\": this is fine, no wiki change needed."
-      , "- If the reason is \"not now\": this is fine, no wiki change needed."
+      , "- If the reason is \"not now\": this is AMBIGUOUS. The user may want the action"
+      , "  but with better targeting. Consider proposing a more granular alternative"
+      , "  rather than suppressing the suggestion entirely."
       ]
     )
   where
@@ -211,3 +214,14 @@ computeCommandStats summaries =
      | cmd <- allCmds
      , Map.findWithDefault 0 cmd successes + Map.findWithDefault 0 cmd failCounts >= 2
      ]
+
+-- | Detect if recent sessions show diminishing returns for cache cleanups.
+-- Returns Just with recent freed amounts if last 3 sessions all freed < 10 MB.
+detectDiminishingReturns :: [SessionSummary] -> Maybe [Integer]
+detectDiminishingReturns summaries =
+  let recent = take 3 (reverse summaries)  -- most recent first
+      freed = map (maybe 0 id . summaryBytesFreed) recent
+      threshold = 10 * 1024 * 1024  -- 10 MB
+  in if length recent >= 3 && all (< threshold) freed
+     then Just freed
+     else Nothing

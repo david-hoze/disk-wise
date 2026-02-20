@@ -10,7 +10,7 @@ import Test.Hspec
 
 import DiskWise.Types
 import DiskWise.History (summarizeSession, formatSessionHistory, computeSkipPatterns,
-                         computeCommandStats)
+                         computeCommandStats, detectDiminishingReturns)
 
 testTime :: UTCTime
 testTime = UTCTime (fromGregorian 2025 1 15) 43200
@@ -153,3 +153,39 @@ spec = do
             , summaryCleanedPaths = [], summarySucceededCmds = ["npm cache clean"]
             }
       computeCommandStats [summary] `shouldBe` []
+
+  describe "detectDiminishingReturns" $ do
+    let mkSummary freed = SessionSummary
+          { summaryTimestamp = testTime
+          , summaryPlatform = PlatformInfo "linux" "x86_64" "bash"
+          , summaryFindingCount = 1, summaryActionsRun = 1, summaryActionsFailed = 0
+          , summarySkipReasons = [], summaryBytesFreed = freed
+          , summaryUserFeedback = Nothing, summaryFailedCmds = []
+          , summaryCleanedPaths = [], summarySucceededCmds = []
+          }
+
+    it "returns Just when 3+ sessions all freed < 10 MB" $ do
+      let summaries = [ mkSummary (Just 5000000)
+                       , mkSummary (Just 2000000)
+                       , mkSummary (Just 0)
+                       ]
+      detectDiminishingReturns summaries `shouldBe` Just [0, 2000000, 5000000]
+
+    it "returns Nothing when fewer than 3 sessions" $ do
+      let summaries = [ mkSummary (Just 0), mkSummary (Just 0) ]
+      detectDiminishingReturns summaries `shouldBe` Nothing
+
+    it "returns Nothing when recent session freed > 10 MB" $ do
+      let summaries = [ mkSummary (Just 0)
+                       , mkSummary (Just 0)
+                       , mkSummary (Just (20 * 1024 * 1024))
+                       ]
+      detectDiminishingReturns summaries `shouldBe` Nothing
+
+    it "returns Nothing when a session freed Nothing (no actions)" $ do
+      let summaries = [ mkSummary Nothing
+                       , mkSummary (Just 0)
+                       , mkSummary (Just 0)
+                       ]
+          -- Nothing maps to 0, so this should actually be Just
+      detectDiminishingReturns summaries `shouldBe` Just [0, 0, 0]
