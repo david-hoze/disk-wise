@@ -3,6 +3,7 @@
 module Main where
 
 import qualified Data.Text as T
+import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import Options.Applicative
 import System.Environment (lookupEnv)
 
@@ -90,6 +91,7 @@ wikiToken = ""
 
 main :: IO ()
 main = do
+  setLocaleEncoding utf8
   cmd <- execParser $ info (commandParser <**> helper)
     ( fullDesc
    <> progDesc "AI-powered disk cleanup with shared wiki knowledge"
