@@ -6,7 +6,7 @@ import qualified Data.Text as T
 import Test.Hspec
 
 import DiskWise.Types
-import DiskWise.Scanner (parseFindings, toMingwPath)
+import DiskWise.Scanner (parseFindings, toMingwPath, validateAction, ValidationResult(..))
 
 spec :: Spec
 spec = do
@@ -87,3 +87,20 @@ spec = do
 
     it "leaves Unix paths unchanged" $ do
       toMingwPath "/home/user" `shouldBe` "/home/user"
+
+  describe "validateAction" $ do
+    it "warns when binary is not found" $ do
+      let action = CleanupAction "test" "nonexistent_binary_xyz123 /tmp" "low" Nothing Nothing
+      vr <- validateAction action
+      validationOk vr `shouldBe` False
+      validationWarnings vr `shouldSatisfy` any (\ w -> "Binary not found" `T.isInfixOf` w)
+
+    it "warns when target path does not exist" $ do
+      let action = CleanupAction "test" "rm /nonexistent/path/xyz123" "low" Nothing Nothing
+      vr <- validateAction action
+      validationWarnings vr `shouldSatisfy` any (\w -> "Path not found" `T.isInfixOf` w)
+
+    it "passes for a valid command with existing binary" $ do
+      let action = CleanupAction "test" "echo hello" "low" Nothing Nothing
+      vr <- validateAction action
+      validationWarnings vr `shouldSatisfy` all (\w -> not ("Binary not found" `T.isInfixOf` w))

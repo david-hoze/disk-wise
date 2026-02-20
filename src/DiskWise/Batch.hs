@@ -85,6 +85,8 @@ batchCleanup config actionJson = do
         [ "success" .= False, "message" .= T.pack err ]
     Right action -> do
       hPutStrLn stderr $ "Running: " <> T.unpack (actionDescription action)
+      vr <- validateAction action
+      mapM_ (\w -> hPutStrLn stderr $ "  WARNING: " <> T.unpack w) (validationWarnings vr)
       result <- runCleanupAction action
       let success = case result of { Right _ -> True; Left _ -> False }
       -- Record outcome against wiki page metadata (best-effort)

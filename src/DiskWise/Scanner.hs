@@ -4,6 +4,8 @@
 module DiskWise.Scanner
   ( scanSystem
   , runCleanupAction
+  , validateAction
+  , ValidationResult(..)
   , parseFindings
   , toMingwPath
   ) where
@@ -12,6 +14,7 @@ import Control.Exception (catch, SomeException)
 import Data.Char (toLower)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import System.Directory (doesPathExist, findExecutable)
 import System.Environment (lookupEnv)
 import System.Process (readCreateProcessWithExitCode, proc)
 import System.Exit (ExitCode(..))
@@ -82,6 +85,41 @@ runCleanupAction action = do
     ExitSuccess   -> pure $ Right ("Done: " <> actionDescription action
                                    <> "\n" <> T.pack out)
     ExitFailure _ -> pure $ Left (T.pack err <> T.pack out)
+
+-- | Result of validating a cleanup action before execution
+data ValidationResult = ValidationResult
+  { validationOk       :: Bool      -- ^ True if action looks safe to present
+  , validationWarnings :: [T.Text]  -- ^ Warnings to show the user (empty = all clear)
+  } deriving (Show, Eq)
+
+-- | Validate a cleanup action before presenting it to the user.
+-- Checks that referenced paths exist and command binaries are available.
+validateAction :: CleanupAction -> IO ValidationResult
+validateAction action = do
+  let cmd = T.unpack (actionCommand action)
+      ws = words cmd
+      binary = case ws of
+        (b:_) -> Just b
+        []    -> Nothing
+      -- Extract paths from the command (tokens starting with / or ~)
+      paths = filter (\w -> take 1 w == "/" || take 1 w == "~") ws
+  binaryWarns <- case binary of
+    Nothing -> pure ["Empty command"]
+    Just b  -> do
+      found <- findExecutable b
+      pure $ case found of
+        Just _  -> []
+        Nothing -> ["Binary not found: " <> T.pack b]
+  pathWarns <- concat <$> mapM checkPath paths
+  let allWarns = binaryWarns <> pathWarns
+  pure ValidationResult
+    { validationOk       = null allWarns
+    , validationWarnings = allWarns
+    }
+  where
+    checkPath p = do
+      exists <- doesPathExist p
+      pure $ if exists then [] else ["Path not found: " <> T.pack p]
 
 -- | Best-effort parsing of scan output (du/find lines) into structured findings.
 -- The @minBytes@ parameter filters out findings smaller than the threshold.

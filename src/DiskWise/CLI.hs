@@ -155,6 +155,10 @@ offerCleanup config sessionRef pages actions = do
         Just wref -> TIO.putStrLn $ "  Wiki ref: " <> wref
         Nothing  -> pure ()
 
+      -- Dry-run validation
+      vr <- validateAction action
+      mapM_ (\w -> TIO.putStrLn $ "  WARNING: " <> w) (validationWarnings vr)
+
       TIO.putStr "  Execute? [y/n] > "
       hFlush stdout
       answer <- getLine
