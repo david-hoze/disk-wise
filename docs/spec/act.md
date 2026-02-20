@@ -24,4 +24,4 @@ Each executed action produces a `CleanupOutcome` that records:
 - The action's position in the proposed list (0-indexed)
 - The actual execution order among accepted actions (0-indexed)
 
-The position and order data lets Claude learn about user trust patterns — do users execute actions in order, or do they cherry-pick? Do they tend to accept low-risk actions first?
+The position and order data lets the engine learn about user trust patterns — do users execute actions in order, or do they cherry-pick? Do they tend to accept low-risk actions first?

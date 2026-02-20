@@ -18,7 +18,7 @@ import System.IO (hFlush, stdout, hSetBuffering, stdin, BufferMode(..))
 
 import DiskWise.Types
 import DiskWise.WikiRouter
-import DiskWise.Claude (investigate, callClaude, buildSystemPrompt, buildLearnPrompt,
+import DiskWise.Engine (investigate, callEngine, buildSystemPrompt, buildLearnPrompt,
                         parseAdvice, agentIdentity, prefixCommitMsg, formatCommandStats)
 import DiskWise.Scanner
 import DiskWise.History (saveSessionSummary, loadSessionHistory, loadMostRecentSummary,
@@ -32,7 +32,7 @@ runApp config = do
 
   TIO.putStrLn "+===========================================+"
   TIO.putStrLn "|           DiskWise v2.0.0                 |"
-  TIO.putStrLn "|   AI-powered disk cleanup with shared     |"
+  TIO.putStrLn "|   Smart disk cleanup with shared           |"
   TIO.putStrLn "|   wiki knowledge                          |"
   TIO.putStrLn "+===========================================+"
   TIO.putStrLn ""
@@ -61,7 +61,7 @@ mainLoop config = do
       TIO.putStrLn "Unknown option, try again."
       mainLoop config
 
--- | Full investigation flow: scan -> parse -> wiki -> match -> Claude -> act -> learn -> refactor
+-- | Full investigation flow: scan -> parse -> wiki -> match -> analyze -> act -> learn -> refactor
 runInvestigate :: AppConfig -> IO ()
 runInvestigate config = do
   platform <- detectPlatform
@@ -93,8 +93,8 @@ runInvestigate config = do
   let isObservationPage p = "observations/" `isPrefixOf` pageRelPath p
       (observationPages, toolPages) = partition isObservationPage wikiPages
 
-  -- Step 4b: Match tool pages to findings (Claude-assisted, with heuristic fallback)
-  matched <- matchPagesWithClaude (callClaude config) toolPages findings
+  -- Step 4b: Match tool pages to findings (engine-assisted, with heuristic fallback)
+  matched <- matchPagesWithEngine (callEngine config) toolPages findings
   let matchedFindingPaths = concatMap (map findingPath . snd) matched
       novelFindings = filter (\f -> findingPath f `notElem` matchedFindingPaths) findings
 
@@ -103,8 +103,8 @@ runInvestigate config = do
   TIO.putStrLn $ T.pack (show (length novelFindings))
               <> " finding(s) not covered by wiki.\n"
 
-  -- Step 5: Call Claude for investigation
-  TIO.putStrLn "-- Asking Claude to analyze --\n"
+  -- Step 5: Run analysis
+  TIO.putStrLn "-- Analyzing --\n"
   let cmdStats = computeCommandStats history
       prevCleaned = maybe [] summaryCleanedPaths prevSummary
       diminishing = detectDiminishingReturns history
@@ -159,7 +159,7 @@ runInvestigate config = do
               historyContext = formatSessionHistory history
                            <> (if T.null regrowthReport then "" else "\n" <> regrowthReport)
                            <> (if T.null cmdStatsText then "" else "\n" <> cmdStatsText)
-          learnResult <- callClaude config buildSystemPrompt
+          learnResult <- callEngine config buildSystemPrompt
             (buildLearnPrompt session' identity historyContext wikiPages diminishing)
           let allContribs = case learnResult of
                 Right text -> case parseAdvice text of
@@ -187,11 +187,11 @@ fetchWikiGracefully config = do
       TIO.putStrLn $ "Wiki unavailable (" <> T.pack (show err) <> "), proceeding without."
       pure []
 
--- | Display Claude's analysis
-presentAdvice :: ClaudeAdvice -> IO ()
+-- | Display the analysis
+presentAdvice :: AnalysisResult -> IO ()
 presentAdvice advice = do
-  TIO.putStrLn "Claude's Analysis:"
-  TIO.putStrLn "-------------------"
+  TIO.putStrLn "Analysis:"
+  TIO.putStrLn "---------"
   TIO.putStrLn (adviceAnalysis advice)
   TIO.putStrLn ""
 

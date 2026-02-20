@@ -47,12 +47,12 @@ commonOptsParser = CommonOpts
         ( long "model"
        <> value "claude-sonnet-4-20250514"
        <> metavar "MODEL"
-       <> help "Claude model to use (default: claude-sonnet-4-20250514)"
+       <> help "Analysis model (default: claude-sonnet-4-20250514)"
         )
   <*> optional (strOption
         ( long "api-key"
        <> metavar "KEY"
-       <> help "Anthropic API key (overrides ANTHROPIC_API_KEY env var)"
+       <> help "API key (overrides DISKWISE_API_KEY env var)"
         ))
   <*> optional (strOption
         ( long "gist-id"
@@ -68,7 +68,7 @@ commandParser = subparser
       (progDesc "Scan system and output JSON findings to stdout"))
   <> command "analyze" (info (BatchAnalyze <$> commonOptsParser
       <*> strArgument (metavar "SCAN_FILE" <> help "Path to scan output JSON file"))
-      (progDesc "Analyze scan output with wiki + Claude, output JSON advice"))
+      (progDesc "Analyze scan output with wiki context, output JSON advice"))
   <> command "cleanup" (info (BatchCleanup <$> commonOptsParser
       <*> strArgument (metavar "ACTION_JSON" <> help "CleanupAction as JSON string"))
       (progDesc "Execute a single cleanup action from JSON"))
@@ -76,7 +76,7 @@ commandParser = subparser
       <*> strArgument (metavar "CONTRIB_JSON" <> help "WikiContribution as JSON string"))
       (progDesc "Push a single wiki contribution from JSON"))
   <> command "garden" (info (Garden <$> commonOptsParser)
-      (progDesc "Improve wiki quality using the gardener (Opus 4.6)"))
+      (progDesc "Improve wiki quality using the gardener"))
   )
   <|> (Interactive <$> commonOptsParser)  -- default to interactive
 
@@ -98,8 +98,8 @@ main = do
   hSetEncoding stdin utf8
   cmd <- execParser $ info (commandParser <**> helper)
     ( fullDesc
-   <> progDesc "AI-powered disk cleanup with shared wiki knowledge"
-   <> header "diskwise - collaborative disk cleanup intelligence"
+   <> progDesc "Smart disk cleanup with shared wiki knowledge"
+   <> header "diskwise - collaborative disk cleanup"
     )
 
   case cmd of
@@ -131,7 +131,7 @@ buildConfig :: CommonOpts -> IO AppConfig
 buildConfig opts = do
   apiKeyMaybe <- case optApiKey opts of
     Just key -> pure (Just key)
-    Nothing  -> lookupEnv "ANTHROPIC_API_KEY"
+    Nothing  -> lookupEnv "DISKWISE_API_KEY"
   let apiKey = maybe "" T.pack apiKeyMaybe
 
   wikiTokenEnv <- lookupEnv "DISKWISE_WIKI_TOKEN"

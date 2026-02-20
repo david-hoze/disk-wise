@@ -6,7 +6,7 @@ The scanner is intentionally generic. It runs three broad filesystem queries:
 2. **`du -sh <path>/*/`** and **`du -sh <path>/.*/`** — largest top-level directories (including hidden), sorted by size
 3. **`find <path> -maxdepth 5 -type f -size +100M`** — large files
 
-No tool-specific paths are hardcoded. The scanner does not know about npm, Docker, Cabal, or any other tool. All interpretation of what the findings mean, what's safe to delete, and how to clean up is delegated to Claude with the wiki as context.
+No tool-specific paths are hardcoded. The scanner does not know about npm, Docker, Cabal, or any other tool. All interpretation of what the findings mean, what's safe to delete, and how to clean up is delegated to the analysis engine with the wiki as context.
 
 ## Finding Parser
 

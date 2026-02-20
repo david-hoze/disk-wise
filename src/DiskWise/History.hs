@@ -91,7 +91,7 @@ lastFeedback events =
     [] -> Nothing
     xs -> Just (last xs)
 
--- | Format session history as a summary for inclusion in Claude prompts
+-- | Format session history as a summary for inclusion in analysis prompts
 formatSessionHistory :: [SessionSummary] -> T.Text
 formatSessionHistory [] = ""
 formatSessionHistory summaries =

@@ -83,9 +83,9 @@ spec = do
         , actionWikiRef      = Nothing
         }
 
-  describe "ClaudeAdvice JSON round-trip" $
+  describe "AnalysisResult JSON round-trip" $
     it "full advice" $
-      jsonRoundTrip ClaudeAdvice
+      jsonRoundTrip AnalysisResult
         { adviceAnalysis       = "Your system has 5GB of stale caches."
         , adviceCleanupActions =
             [ CleanupAction "Clean npm" "npm cache clean --force" "low"

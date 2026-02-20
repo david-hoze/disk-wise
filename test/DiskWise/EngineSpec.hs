@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module DiskWise.ClaudeSpec (spec) where
+module DiskWise.EngineSpec (spec) where
 
 import qualified Data.Text as T
 import Data.Time.Clock (UTCTime(..))
@@ -8,7 +8,7 @@ import Data.Time.Calendar (fromGregorian)
 import Test.Hspec
 
 import DiskWise.Types
-import DiskWise.Claude (buildPrompt, buildPromptWith, buildSystemPrompt,
+import DiskWise.Engine (buildPrompt, buildPromptWith, buildSystemPrompt,
                         buildLearnPrompt,
                         buildGardenSystemPrompt, buildGardenPrompt,
                         parseAdvice, parseRefactorResult,

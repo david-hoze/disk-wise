@@ -1,14 +1,14 @@
 # DiskWise
 
-**AI-powered disk cleanup with shared wiki knowledge.**
+**Smart disk cleanup with shared wiki knowledge.**
 
-DiskWise scans your filesystem, consults a community-maintained wiki for context, sends both to Claude for analysis, presents cleanup advice, and writes anything new it learned back to the wiki. Every agent reads from and writes to the same shared knowledge base — and learns from every session.
+DiskWise scans your filesystem, consults a community-maintained wiki for context, analyzes your disk usage, presents cleanup advice, and writes anything new it learned back to the wiki. Every instance reads from and writes to the same shared knowledge base — and learns from every session.
 
 ## How It Works
 
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│   Scanner    │────▶│  Wiki Match  │────▶│   Claude     │
+│   Scanner    │────▶│  Wiki Match  │────▶│   Engine     │
 │  (du, find)  │     │ (GitHub API) │     │  (analysis)  │
 └──────────────┘     └──────────────┘     └──────┬───────┘
                                                   │
@@ -27,19 +27,19 @@ DiskWise scans your filesystem, consults a community-maintained wiki for context
 
                      ┌──────────────────────────────────────┐
                      │   diskwise garden (separate command)  │
-                     │   Gardener (Opus 4.6) improves wiki  │
+                     │   Gardener improves wiki              │
                      │   quality, maintains _meta/ notes     │
                      └──────────────────────────────────────┘
 ```
 
 ### The Flow
 
-1. **Follow-up**: At session start, the agent checks whether previously cleaned paths have regrown and asks about delayed side effects from the last session.
-2. **Investigate**: A generic scanner runs `df`, `du`, and `find` to discover what's large — no tool-specific knowledge baked in. The agent fetches wiki pages from GitHub and matches them to findings by path patterns and tool names. Unmatched findings are flagged as novel. Everything goes to Claude for interpretation, along with command reliability statistics from previous sessions.
-3. **Act**: Claude proposes cleanup actions with risk levels and size estimates. Each action is validated (binary exists, paths exist) before presentation. You confirm each one before it runs. The agent measures actual space freed and records outcomes. Nothing is ever deleted without your say-so.
-4. **Learn**: Claude reviews the entire session — what was scanned, what actions ran, what failed, what the user skipped and why, how much space was actually freed — and drafts wiki contributions for anything useful. Contributions are deduplicated against existing pages.
+1. **Follow-up**: At session start, DiskWise checks whether previously cleaned paths have regrown and asks about delayed side effects from the last session.
+2. **Investigate**: A generic scanner runs `df`, `du`, and `find` to discover what's large — no tool-specific knowledge baked in. DiskWise fetches wiki pages from GitHub and matches them to findings by path patterns and tool names. Unmatched findings are flagged as novel. Everything goes to the analysis engine for interpretation, along with command reliability statistics from previous sessions.
+3. **Act**: The engine proposes cleanup actions with risk levels and size estimates. Each action is validated (binary exists, paths exist) before presentation. You confirm each one before it runs. DiskWise measures actual space freed and records outcomes. Nothing is ever deleted without your say-so.
+4. **Learn**: The engine reviews the entire session — what was scanned, what actions ran, what failed, what the user skipped and why, how much space was actually freed — and drafts wiki contributions for anything useful. Contributions are deduplicated against existing pages.
 5. **Feedback**: The agent asks whether anything broke after cleanup. User feedback is the highest-priority learning signal.
-6. **Garden** (separate command): `diskwise garden` uses Claude Opus 4.6 to review the entire wiki and improve quality — merging duplicates, rewriting, reorganizing. It maintains its own notes in `_meta/` pages across sessions. Runs up to 5 passes per invocation.
+6. **Garden** (separate command): `diskwise garden` reviews the entire wiki and improves quality — merging duplicates, rewriting, reorganizing. It maintains its own notes in `_meta/` pages across sessions. Runs up to 5 passes per invocation.
 
 ### Session Learning
 
@@ -63,16 +63,13 @@ cabal build
 # Install to PATH
 cabal install
 
-# Run (zero-config if you have Claude Code installed)
-diskwise
+# Run
+DISKWISE_API_KEY=your-key diskwise
 ```
 
-### Claude Access
+### API Access
 
-DiskWise supports two ways to use Claude:
-
-- **Claude Code CLI** (preferred): If you have `claude` installed and logged in, it just works. No API key needed.
-- **API key fallback**: Set `ANTHROPIC_API_KEY` in your environment. The agent falls back to this if the CLI isn't available.
+Set `DISKWISE_API_KEY` in your environment or pass `--api-key` on the command line.
 
 ### Wiki Access
 
@@ -99,7 +96,7 @@ diskwise --min-size 100
 # Override API key
 diskwise --api-key sk-ant-...
 
-# Use a different Claude model
+# Use a different model
 diskwise --model claude-sonnet-4-20250514
 
 # Use gist backend instead of repo
@@ -108,13 +105,13 @@ diskwise --gist-id abc123def456
 
 ### Batch Mode
 
-Batch mode splits the flow into composable JSON subcommands, usable by scripts or outer AI agents:
+Batch mode splits the flow into composable JSON subcommands, usable by scripts or automation:
 
 ```bash
 # Step 1: Scan the system, get JSON findings
 diskwise scan > scan.json
 
-# Step 2: Analyze with wiki + Claude, get advice as JSON
+# Step 2: Analyze with wiki context, get advice as JSON
 diskwise analyze scan.json > advice.json
 
 # Step 3: Execute a specific cleanup action
@@ -128,10 +125,10 @@ All batch subcommands write progress to stderr and results to stdout.
 
 ### Garden Mode
 
-The gardener command uses Claude Opus 4.6 to improve wiki quality — merging duplicates, rewriting unclear content, reorganizing structure. It maintains its own notes in `_meta/` pages across sessions.
+The gardener command improves wiki quality — merging duplicates, rewriting unclear content, reorganizing structure. It maintains its own notes in `_meta/` pages across sessions.
 
 ```bash
-# Run the gardener (uses Opus 4.6, no extra config needed)
+# Run the gardener
 diskwise garden
 ```
 
@@ -144,11 +141,11 @@ diskwise/
 ├── app/
 │   └── Main.hs              # CLI entry point, arg parsing
 ├── src/DiskWise/
-│   ├── Types.hs             # Domain types (WikiPage, ClaudeAdvice, SessionLog, etc.)
+│   ├── Types.hs             # Domain types (WikiPage, AnalysisResult, SessionLog, etc.)
 │   ├── Wiki.hs              # GitHub wiki API: fetch, match, create, update, retry
 │   ├── WikiGist.hs          # Gist backend: same interface, flat file storage
 │   ├── WikiRouter.hs        # Routes wiki calls to repo or gist based on config
-│   ├── Claude.hs            # Claude access: CLI subprocess + API fallback, prompt building
+│   ├── Engine.hs            # Analysis engine: API access, prompt building
 │   ├── Scanner.hs           # Generic system scanning (du, find) + measurement utilities
 │   ├── History.hs           # Session persistence: save/load summaries, compute patterns
 │   ├── Batch.hs             # Non-interactive JSON subcommands (scan, analyze, cleanup, contribute)
@@ -158,7 +155,7 @@ diskwise/
 │   ├── WikiSpec.hs          # Pattern matching and page extraction tests
 │   ├── WikiGistSpec.hs      # Gist path encoding/decoding tests
 │   ├── ScannerSpec.hs       # Finding parser and validation tests
-│   ├── ClaudeSpec.hs        # Prompt building and response parsing tests
+│   ├── EngineSpec.hs        # Prompt building and response parsing tests
 │   └── HistorySpec.hs       # Session summary, skip patterns, command stats tests
 ├── docs/
 │   └── spec/                # Behavioral specification (v4), split by topic
@@ -170,7 +167,7 @@ diskwise/
 │       ├── garden.md        # Wiki gardening + meta wiki
 │       ├── session-learning.md  # Cross-session intelligence
 │       ├── wiki-structure.md    # Wiki layout, access, gist backend
-│       ├── claude-access.md     # Claude CLI + API
+│       ├── claude-access.md     # Engine / API access
 │       ├── batch-mode.md        # JSON subcommands
 │       ├── scanner-design.md    # Scanner internals
 │       └── invariants.md        # Core principles
@@ -180,12 +177,12 @@ diskwise/
 
 ## Design Decisions
 
-- **Generic scanner, smart interpreter**: The scanner knows nothing about specific tools — it just finds what's big. All interpretation (what's safe to delete, how to clean up) comes from Claude + the wiki. This keeps the scanner simple and portable across platforms.
-- **Wiki over rules**: Instead of a local rules engine, DiskWise uses a shared GitHub wiki. Every agent contributes to a growing knowledge base that benefits all users.
-- **Session-aware learning**: Claude sees the full session — actions executed, errors encountered, user decisions and their reasons, actual space freed — not just scan data. This grounds wiki contributions in real experience.
-- **Cross-session intelligence**: Skip patterns, command reliability, regrowth detection, and user feedback accumulate across sessions. The agent gets smarter with use.
+- **Generic scanner, smart interpreter**: The scanner knows nothing about specific tools — it just finds what's big. All interpretation (what's safe to delete, how to clean up) comes from the analysis engine + the wiki. This keeps the scanner simple and portable across platforms.
+- **Wiki over rules**: Instead of a local rules engine, DiskWise uses a shared GitHub wiki. Every instance contributes to a growing knowledge base that benefits all users.
+- **Session-aware learning**: The engine sees the full session — actions executed, errors encountered, user decisions and their reasons, actual space freed — not just scan data. This grounds wiki contributions in real experience.
+- **Cross-session intelligence**: Skip patterns, command reliability, regrowth detection, and user feedback accumulate across sessions. DiskWise gets smarter with use.
 - **Dual backend**: Wiki pages can be stored in a GitHub repo (full directory structure) or a GitHub Gist (flat, simpler setup). The routing is transparent to the rest of the codebase.
-- **Gardener separation**: Normal agents contribute raw knowledge. The gardener (a separate command using Opus 4.6) shapes the wiki into a well-organized knowledge base, maintaining its own meta wiki for cross-session context.
+- **Gardener separation**: Normal sessions contribute raw knowledge. The gardener (a separate command) shapes the wiki into a well-organized knowledge base, maintaining its own meta wiki for cross-session context.
 - **Optimistic concurrency**: Wiki writes use SHA-based conflict detection with exponential backoff retry. Failed writes are saved locally and retried next session.
-- **Zero-config goal**: If you have Claude Code installed, the tool works out of the box. Wiki access is built in. The user configures nothing.
+- **Minimal config**: Set your API key and DiskWise handles the rest. Wiki access is built in.
 - **User approval is mandatory**: Nothing is deleted without explicit confirmation. Wiki contributions are previewed before pushing.

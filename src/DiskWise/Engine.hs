@@ -1,12 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module DiskWise.Claude
+module DiskWise.Engine
   ( investigate
-  , callClaude
-  , callClaudeCode
-  , callClaudeApi
-  , callClaudeGarden
+  , callEngine
+  , callEngineApi
+  , callEngineGarden
   , buildPrompt
   , buildPromptWith
   , buildSystemPrompt
@@ -32,16 +31,10 @@ import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Header (hContentType)
 import Network.HTTP.Types.Status (statusCode)
-import qualified Data.ByteString as BS
-import System.Directory (getTemporaryDirectory, removeFile)
-import System.FilePath ((</>))
 import System.Exit (ExitCode(..))
-import System.IO (hSetBinaryMode)
-import System.Process (readCreateProcessWithExitCode, readProcess, proc, shell,
-                       createProcess, CreateProcess(..), StdStream(..), waitForProcess)
+import System.Process (readCreateProcessWithExitCode, proc)
 
 import DiskWise.Types
-import DiskWise.Scanner (toMingwPath)
 
 -- | Generate an agent identity string for wiki History sections
 -- Uses a hash of the machine's hostname for privacy
@@ -62,15 +55,15 @@ prefixCommitMsg msg
   | "diskwise-agent:" `T.isPrefixOf` msg = msg
   | otherwise = "diskwise-agent: " <> msg
 
--- | Call Claude to investigate disk usage with wiki context
+-- | Investigate disk usage with wiki context
 investigate :: AppConfig -> T.Text -> [(WikiPage, [Finding])] -> [Finding]
            -> [CommandStats] -> [(FilePath, Integer)] -> [WikiPage] -> [WikiPage]
            -> Maybe [Integer] -> [(T.Text, Int)]
-           -> IO (Either DiskWiseError ClaudeAdvice)
+           -> IO (Either DiskWiseError AnalysisResult)
 investigate config scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages diminishing zeroYield = do
   let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages diminishing zeroYield
       sysPrompt = buildSystemPrompt
-  result <- callClaude config sysPrompt userPrompt
+  result <- callEngine config sysPrompt userPrompt
   case result of
     Left err -> pure (Left err)
     Right text -> pure (parseAdvice text)
@@ -81,96 +74,23 @@ prefixGardenerMsg msg
   | "diskwise-gardener:" `T.isPrefixOf` msg = msg
   | otherwise = "diskwise-gardener: " <> msg
 
--- | Try Claude Code CLI first, fall back to API key
-callClaude :: AppConfig -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
-callClaude config sysPrompt userPrompt = do
-  cliResult <- callClaudeCode Nothing sysPrompt userPrompt
-  case cliResult of
-    Right text -> pure (Right text)
-    Left _ ->
-      if T.null (configApiKey config)
-      then pure (Left (ClaudeError "No Claude access: CLI unavailable and no API key set"))
-      else callClaudeApi config Nothing sysPrompt userPrompt
+-- | Call the analysis engine API. Errors if no API key is set.
+callEngine :: AppConfig -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
+callEngine config sysPrompt userPrompt =
+  if T.null (configApiKey config)
+  then pure (Left (EngineError "No API key set. Set DISKWISE_API_KEY or pass --api-key."))
+  else callEngineApi config Nothing sysPrompt userPrompt
 
--- | Call Claude with Opus 4.6 model override (for gardener)
-callClaudeGarden :: AppConfig -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
-callClaudeGarden config sysPrompt userPrompt = do
-  let model = Just "claude-opus-4-6"
-  cliResult <- callClaudeCode model sysPrompt userPrompt
-  case cliResult of
-    Right text -> pure (Right text)
-    Left _ ->
-      if T.null (configApiKey config)
-      then pure (Left (ClaudeError "No Claude access: CLI unavailable and no API key set"))
-      else callClaudeApi config model sysPrompt userPrompt
+-- | Call the analysis engine with Opus 4.6 model override (for gardener)
+callEngineGarden :: AppConfig -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
+callEngineGarden config sysPrompt userPrompt =
+  if T.null (configApiKey config)
+  then pure (Left (EngineError "No API key set. Set DISKWISE_API_KEY or pass --api-key."))
+  else callEngineApi config (Just "claude-opus-4-6") sysPrompt userPrompt
 
--- | Invoke Claude Code CLI as subprocess with --print flag
--- Uses sh -c to invoke claude, which handles PATH resolution on all platforms
-callClaudeCode :: Maybe T.Text -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
-callClaudeCode modelOverride sysPrompt userPrompt = do
-  -- Unset CLAUDECODE in shell commands to allow invocation from within Claude Code
-  let unsetPrefix = "unset CLAUDECODE; "
-  -- First check claude is available
-  checkResult <- try $ readProcess "sh" ["-c", unsetPrefix <> "claude --version 2>/dev/null"] ""
-    :: IO (Either SomeException String)
-  case checkResult of
-    Left e -> pure (Left (ClaudeError ("Claude CLI not found: " <> T.pack (show e))))
-    Right v | null v -> pure (Left (ClaudeError "Claude CLI not found"))
-    Right _ -> do
-      -- Write combined prompt to temp file to avoid command-line length limits
-      -- and Unicode encoding issues on Windows.
-      -- Use Windows temp dir for writing (GHC is a Windows binary),
-      -- then convert to MINGW path for the shell command.
-      tmpDir <- getTemporaryDirectory
-      let winPromptFile = tmpDir </> "diskwise-prompt.txt"
-          promptFile = toMingwPath winPromptFile
-          combined = T.unlines
-            [ "== SYSTEM INSTRUCTIONS =="
-            , sysPrompt
-            , ""
-            , "== YOUR TASK =="
-            , userPrompt
-            ]
-      BS.writeFile winPromptFile (TE.encodeUtf8 combined)
-      let modelFlag = case modelOverride of
-            Just m  -> " --model " <> shellQuote (T.unpack m)
-            Nothing -> ""
-          cmd = unsetPrefix <> "claude --print" <> modelFlag
-                <> " < " <> shellQuote promptFile
-      result <- try $ readProcessUtf8 "sh" ["-c", cmd]
-      removeFile winPromptFile `catch` (\(_ :: SomeException) -> pure ())
-      case result of
-        Left (e :: SomeException) ->
-          pure (Left (ClaudeError ("Claude CLI failed: " <> T.pack (show e))))
-        Right (ExitSuccess, out, _) ->
-          pure (Right out)
-        Right (ExitFailure code, _, err) ->
-          pure (Left (ClaudeError ("Claude CLI exit " <> T.pack (show code) <> ": " <> err)))
-
--- | Read a process's stdout/stderr as raw bytes and decode as UTF-8.
--- This avoids the system code page mangling non-ASCII characters on Windows/MINGW.
-readProcessUtf8 :: FilePath -> [String] -> IO (ExitCode, T.Text, T.Text)
-readProcessUtf8 cmd args = do
-  (_, Just hOut, Just hErr, ph) <- createProcess (proc cmd args)
-    { std_out = CreatePipe
-    , std_err = CreatePipe
-    }
-  hSetBinaryMode hOut True
-  hSetBinaryMode hErr True
-  outBytes <- BS.hGetContents hOut
-  errBytes <- BS.hGetContents hErr
-  exitCode <- waitForProcess ph
-  pure (exitCode, TE.decodeUtf8 outBytes, TE.decodeUtf8 errBytes)
-
--- | Shell-quote a string for safe embedding in sh -c commands
-shellQuote :: String -> String
-shellQuote s = "'" <> concatMap esc s <> "'"
-  where esc '\'' = "'\\''"
-        esc c    = [c]
-
--- | Call Claude via the Anthropic API
-callClaudeApi :: AppConfig -> Maybe T.Text -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
-callClaudeApi config modelOverride sysPrompt userPrompt = do
+-- | Call the analysis engine via the API
+callEngineApi :: AppConfig -> Maybe T.Text -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
+callEngineApi config modelOverride sysPrompt userPrompt = do
   manager <- newManager tlsManagerSettings
 
   let model = maybe (configModel config) id modelOverride
@@ -204,12 +124,12 @@ callClaudeApi config modelOverride sysPrompt userPrompt = do
   if status >= 200 && status < 300
     then case eitherDecode body of
       Left err ->
-        pure (Left (ClaudeError ("Failed to parse API response: " <> T.pack err)))
+        pure (Left (EngineError ("Failed to parse API response: " <> T.pack err)))
       Right val ->
         pure (Right (extractTextContent val))
-    else pure (Left (ClaudeError ("API returned status " <> T.pack (show status))))
+    else pure (Left (EngineError ("API returned status " <> T.pack (show status))))
 
--- | Extract text content from Claude API response JSON
+-- | Extract text content from API response JSON
 extractTextContent :: Value -> T.Text
 extractTextContent (Object obj) =
   case KM.lookup "content" obj of
@@ -221,10 +141,10 @@ extractTextContent (Object obj) =
     _ -> "No content in response"
 extractTextContent _ = "Unexpected response format"
 
--- | Build the system prompt defining Claude's role and output format
+-- | Build the system prompt defining the engine's role and output format
 buildSystemPrompt :: T.Text
 buildSystemPrompt = T.unlines
-  [ "You are DiskWise, an AI disk cleanup advisor. You analyze filesystem scan data"
+  [ "You are DiskWise, a disk cleanup advisor. You analyze filesystem scan data"
   , "and wiki knowledge to provide actionable cleanup advice."
   , ""
   , "You MUST respond with valid JSON in this exact structure:"
@@ -302,7 +222,7 @@ buildSystemPrompt = T.unlines
   , "- Unexpected interactions between tools"
   , "- Corrections to existing wiki advice based on what you just saw"
   , ""
-  , "Do NOT write generic tool documentation that Claude already knows."
+  , "Do NOT write generic tool documentation that is already widely known."
   , "If a tool page doesn't exist yet, create one, but populate it primarily"
   , "with concrete observations from this scan rather than general knowledge."
   , "Mark general knowledge sections with \"(general)\" and observed data with"
@@ -623,15 +543,15 @@ buildGardenPrompt contentPages metaPages identity = T.unlines $
       ] <> formatOutcomeHistory page <>
       [ "" ]
 
--- | Parse Claude's JSON response into ClaudeAdvice
-parseAdvice :: T.Text -> Either DiskWiseError ClaudeAdvice
+-- | Parse JSON response into AnalysisResult
+parseAdvice :: T.Text -> Either DiskWiseError AnalysisResult
 parseAdvice text =
   let jsonText = extractJson text
   in case eitherDecode (BL.fromStrict (TE.encodeUtf8 jsonText)) of
-    Left err -> Left (ParseError ("Failed to parse Claude's response as JSON: " <> T.pack err))
+    Left err -> Left (ParseError ("Failed to parse response as JSON: " <> T.pack err))
     Right val -> parseAdviceValue val
 
--- | Parse Claude's JSON response into RefactorResult
+-- | Parse JSON response into RefactorResult
 parseRefactorResult :: T.Text -> Either DiskWiseError RefactorResult
 parseRefactorResult text =
   let jsonText = extractJson text
@@ -651,8 +571,8 @@ extractJson text =
      then T.strip text
      else beforeClose
 
--- | Parse a JSON Value into ClaudeAdvice
-parseAdviceValue :: Value -> Either DiskWiseError ClaudeAdvice
+-- | Parse a JSON Value into an AnalysisResult
+parseAdviceValue :: Value -> Either DiskWiseError AnalysisResult
 parseAdviceValue (Object obj) = do
   let analysis = case KM.lookup "analysis" obj of
         Just (String t) -> t
@@ -666,12 +586,12 @@ parseAdviceValue (Object obj) = do
         Just (Array arr) -> [c | Just c <- map parseContribution (foldMap pure arr)]
         _                -> []
 
-  Right ClaudeAdvice
+  Right AnalysisResult
     { adviceAnalysis       = analysis
     , adviceCleanupActions = actions
     , adviceContributions  = contribs
     }
-parseAdviceValue _ = Left (ParseError "Expected JSON object from Claude")
+parseAdviceValue _ = Left (ParseError "Expected JSON object in response")
 
 -- | Parse a JSON Value into RefactorResult
 parseRefactorValue :: Value -> Either DiskWiseError RefactorResult
@@ -693,9 +613,9 @@ parseRefactorValue (Object obj) = do
     , refactorDone          = done
     , refactorSummary       = summary
     }
-parseRefactorValue _ = Left (ParseError "Expected JSON object from Claude")
+parseRefactorValue _ = Left (ParseError "Expected JSON object in response")
 
--- | Parse a cleanup action from Claude's snake_case JSON
+-- | Parse a cleanup action from snake_case JSON
 parseCleanupAction :: Value -> Maybe CleanupAction
 parseCleanupAction (Object o) = do
   let str key = case KM.lookup key o of
@@ -720,7 +640,7 @@ parseCleanupAction (Object o) = do
     }
 parseCleanupAction _ = Nothing
 
--- | Parse a wiki contribution from Claude's snake_case JSON
+-- | Parse a wiki contribution from snake_case JSON
 parseContribution :: Value -> Maybe WikiContribution
 parseContribution (Object o) = do
   let str key = case KM.lookup key o of

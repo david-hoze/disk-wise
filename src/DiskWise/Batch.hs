@@ -19,7 +19,7 @@ import System.IO (hPutStrLn, stderr)
 
 import DiskWise.Types
 import DiskWise.WikiRouter
-import DiskWise.Claude
+import DiskWise.Engine
 import DiskWise.Scanner
 
 -- | Scan the system and output JSON findings to stdout
@@ -36,7 +36,7 @@ batchScan config = do
     , "findings"    .= findings
     ]
 
--- | Take scan output (from stdin or file), fetch wiki, call Claude, output JSON advice
+-- | Take scan output (from stdin or file), fetch wiki, run analysis, output JSON advice
 -- Input:  { "scan_output": "...", "findings": [...] }
 -- Output: { "analysis": "...", "cleanup_actions": [...], "wiki_contributions": [...] }
 batchAnalyze :: AppConfig -> FilePath -> IO ()
@@ -54,20 +54,20 @@ batchAnalyze config scanFile = do
       hPutStrLn stderr "Fetching wiki..."
       wikiPages <- fetchWikiGracefully' config
 
-      -- Match (Claude-assisted, with heuristic fallback)
-      matched <- matchPagesWithClaude (callClaude config) wikiPages findings
+      -- Match (engine-assisted, with heuristic fallback)
+      matched <- matchPagesWithEngine (callEngine config) wikiPages findings
       let matchedPaths = concatMap (map findingPath . snd) matched
           novel = filter (\f -> findingPath f `notElem` matchedPaths) findings
 
       hPutStrLn stderr $ "Wiki matched " <> show (length matched) <> " page(s)."
       hPutStrLn stderr $ show (length novel) <> " novel finding(s)."
 
-      -- Call Claude
-      hPutStrLn stderr "Calling Claude..."
+      -- Run analysis
+      hPutStrLn stderr "Running analysis..."
       result <- investigate config scanOutput matched novel [] [] [] [] Nothing []
       case result of
         Left err -> do
-          hPutStrLn stderr $ "Claude error: " <> show err
+          hPutStrLn stderr $ "Analysis error: " <> show err
           BLC.putStrLn $ encode $ object [ "error" .= T.pack (show err) ]
         Right advice ->
           let deduped = advice { adviceContributions =
@@ -136,7 +136,7 @@ instance FromJSON ScanData where
     ScanData <$> o .: "scan_output"
              <*> o .: "findings"
 
--- | Run the gardener: improve wiki quality using Opus 4.6
+-- | Run the gardener: improve wiki quality
 batchGarden :: AppConfig -> IO ()
 batchGarden config = do
   hPutStrLn stderr "Fetching full wiki tree (including _meta/)..."
@@ -166,7 +166,7 @@ gardenLoop config cacheRef identity passNum passSummaries = do
       hPutStrLn stderr $ "Gardening pass " <> show (passNum + 1) <> "..."
       let userPrompt = buildGardenPrompt contentPages metaPages identity
           sysPrompt = buildGardenSystemPrompt
-      result <- callClaudeGarden config sysPrompt userPrompt
+      result <- callEngineGarden config sysPrompt userPrompt
       case result of
         Left err -> do
           hPutStrLn stderr $ "Gardening error: " <> show err

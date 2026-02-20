@@ -38,7 +38,7 @@ Skip reasons are aggregated across sessions into **skip patterns**. If an action
 - **Not applicable**: The matching may be wrong, or the page needs platform notes.
 - **Already handled / Not now**: No wiki change needed.
 
-Skip patterns are included in the Claude prompt so it can adjust its recommendations.
+Skip patterns are included in the analysis prompt so the engine can adjust its recommendations.
 
 ## Space Measurement
 
@@ -48,7 +48,7 @@ Every executed cleanup action is measured:
 2. The action runs.
 3. `df` is called after execution to compute actual bytes freed.
 
-The measured result is compared to the wiki's size estimate. If they differ significantly, Claude is prompted to amend the wiki page with real-world observations.
+The measured result is compared to the wiki's size estimate. If they differ significantly, the engine is prompted to amend the wiki page with real-world observations.
 
 ## Regrowth Detection
 
@@ -58,7 +58,7 @@ At the start of each session, the agent checks whether paths cleaned in the prev
 2. For each `(path, bytesFreed)` in `cleanedPaths`, measure the current size of that path.
 3. If the current size exceeds half the previously freed amount, report it as regrowth.
 
-Regrowth data is included in the Claude prompt with guidance to consider whether recurring cleanup should be automated.
+Regrowth data is included in the analysis prompt with guidance to consider whether recurring cleanup should be automated.
 
 ## Delayed Feedback
 
@@ -74,16 +74,16 @@ At the end of the current session, if any actions were executed, the agent asks:
 
 > Did anything break or behave unexpectedly after cleanup? [n] Everything's fine [y] Something went wrong
 
-Feedback is recorded and included in the learn prompt. Claude is instructed to treat user feedback as the highest-priority signal and to amend the relevant wiki page's "What's NOT safe to delete" section.
+Feedback is recorded and included in the learn prompt. The engine is instructed to treat user feedback as the highest-priority signal and to amend the relevant wiki page's "What's NOT safe to delete" section.
 
 ## Action Acceptance Order
 
 Each cleanup outcome records two positions:
 
-- **Position**: Where the action appeared in Claude's proposed list (0-indexed).
+- **Position**: Where the action appeared in the engine's proposed list (0-indexed).
 - **Order**: The actual execution order among accepted actions (0-indexed).
 
-This data lets Claude learn about user trust patterns over time — whether users execute in order or cherry-pick, and whether they tend to accept low-risk actions first.
+This data lets the engine learn about user trust patterns over time — whether users execute in order or cherry-pick, and whether they tend to accept low-risk actions first.
 
 ## Command Reliability
 
@@ -93,7 +93,7 @@ The agent aggregates per-command success/failure statistics across all sessions.
 - Success rate as a percentage
 - Most recent error message (if any)
 
-These statistics are included in both the investigation prompt and the learn prompt. Claude is guided to:
+These statistics are included in both the investigation prompt and the learn prompt. The engine is guided to:
 
 - Add platform-specific notes to wiki pages for unreliable commands
 - Suggest alternative commands
@@ -101,7 +101,7 @@ These statistics are included in both the investigation prompt and the learn pro
 
 ## Platform Correlation
 
-Each session records the platform (OS, architecture, shell). The learn prompt includes this information so Claude can:
+Each session records the platform (OS, architecture, shell). The learn prompt includes this information so the engine can:
 
 - Document platform-specific failures in wiki pages' `## Platform notes` sections
 - Use the format: "On [OS] ([arch]): [observation]"
@@ -117,4 +117,4 @@ Each wiki contribution records how the user decided:
 | `ContribSkipped` | User declined the contribution |
 | `ContribEdited` | User requested edits before pushing |
 
-This informs Claude about what kinds of contributions users find valuable vs. unhelpful.
+This informs the engine about what kinds of contributions users find valuable vs. unhelpful.

@@ -131,7 +131,7 @@ Each wiki page carries metadata for outcome tracking:
 - `pageFailCount`: How many times advice from this page led to a failure
 - `pageLastVerified`: When the page was last verified on a real system
 
-This data is included in Claude prompts so it can prioritize reliable advice and flag pages with high failure rates.
+This data is included in analysis prompts so the engine can prioritize reliable advice and flag pages with high failure rates.
 
 ## Gist Backend
 

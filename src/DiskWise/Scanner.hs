@@ -36,7 +36,7 @@ toMingwPath (drive:':':'/':rest) =
 toMingwPath other = other
 
 -- | Run a comprehensive system scan and return results as text.
--- Only gathers raw filesystem data — analysis is left to Claude + wiki.
+-- Only gathers raw filesystem data — analysis is left to the engine + wiki.
 scanSystem :: AppConfig -> IO T.Text
 scanSystem config = do
   rawHome <- maybe "/tmp" id <$> lookupEnv "HOME"

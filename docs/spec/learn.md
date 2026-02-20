@@ -1,6 +1,6 @@
 # Learn
 
-After an investigation, Claude reviews the entire session — the scan, its analysis, the user's actions, any errors encountered, any surprises — and drafts wiki contributions (new pages or amendments to existing ones).
+After an investigation, the engine reviews the entire session — the scan, its analysis, the user's actions, any errors encountered, any surprises — and drafts wiki contributions (new pages or amendments to existing ones).
 
 The bar for contributing is low. If it might save a future agent five seconds of reasoning or prevent it from making a wrong suggestion, write it down.
 

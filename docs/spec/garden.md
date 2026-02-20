@@ -4,15 +4,15 @@ The gardener is a separate command (`diskwise garden`) that improves wiki qualit
 
 ## Model
 
-The gardener always uses Claude Opus 4.6 (`claude-opus-4-6`) at high effort. Wiki gardening requires the strongest reasoning available — it involves judging quality, spotting subtle duplication, making organizational decisions, and writing clear prose. Weaker or faster models are not suitable.
+The gardener always uses the strongest available model (`claude-opus-4-6`) at high effort. Wiki gardening requires the strongest reasoning available — it involves judging quality, spotting subtle duplication, making organizational decisions, and writing clear prose. Weaker or faster models are not suitable.
 
 ## Flow
 
 1. The gardener fetches the entire wiki, including the meta wiki (`_meta/`).
-2. It partitions pages into content pages and meta pages. Meta pages are presented to Claude in a separate section so it understands they are its own notes, not content to refactor.
-3. It enters a gardening loop (up to 5 passes): build a prompt with content pages + meta pages + agent identity + outcome history, call Claude Opus 4.6, parse the result, push improvements with the `diskwise-gardener:` commit prefix.
+2. It partitions pages into content pages and meta pages. Meta pages are presented to the engine in a separate section so it understands they are its own notes, not content to refactor.
+3. It enters a gardening loop (up to 5 passes): build a prompt with content pages + meta pages + agent identity + outcome history, call the engine, parse the result, push improvements with the `diskwise-gardener:` commit prefix.
 4. Between passes, it re-fetches the full wiki tree so it can see its own changes (including any `_meta/` pages it wrote as contributions during the pass).
-5. The loop stops when Claude returns `done=true`, produces no contributions, or the pass limit (5) is reached.
+5. The loop stops when the engine returns `done=true`, produces no contributions, or the pass limit (5) is reached.
 6. After the loop completes, the gardener writes a session summary to `_meta/gardening-log.md` recording what each pass accomplished. If the page doesn't exist yet (first garden run), it is created; otherwise it is amended.
 7. Each improvement is a separate commit so the history stays granular.
 

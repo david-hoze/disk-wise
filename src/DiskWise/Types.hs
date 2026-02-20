@@ -7,7 +7,7 @@ module DiskWise.Types
   , WikiContribution(..)
   , ContribType(..)
   , CleanupAction(..)
-  , ClaudeAdvice(..)
+  , AnalysisResult(..)
   , Finding(..)
   , AppConfig(..)
   , DiskWiseError(..)
@@ -87,15 +87,15 @@ data CleanupAction = CleanupAction
 instance ToJSON CleanupAction
 instance FromJSON CleanupAction
 
--- | What Claude returns after investigating
-data ClaudeAdvice = ClaudeAdvice
+-- | What the analysis engine returns after investigating
+data AnalysisResult = AnalysisResult
   { adviceAnalysis       :: Text
   , adviceCleanupActions :: [CleanupAction]
   , adviceContributions  :: [WikiContribution]
   } deriving (Show, Eq, Generic)
 
-instance ToJSON ClaudeAdvice
-instance FromJSON ClaudeAdvice
+instance ToJSON AnalysisResult
+instance FromJSON AnalysisResult
 
 -- | A structured finding from scanning
 data Finding = Finding
@@ -126,7 +126,7 @@ instance FromJSON AppConfig
 -- | Errors that can occur in DiskWise
 data DiskWiseError
   = GitHubApiError Text
-  | ClaudeError Text
+  | EngineError Text
   | ParseError Text
   | WikiNotAvailable
   deriving (Show, Eq)
@@ -177,7 +177,7 @@ data ContribDecision
 instance ToJSON ContribDecision
 instance FromJSON ContribDecision
 
--- | An event that occurred during the session, for Claude to learn from
+-- | An event that occurred during the session, for the engine to learn from
 data SessionEvent
   = ActionExecuted CleanupOutcome       -- ^ action executed with outcome
   | ActionFailed CleanupOutcome         -- ^ action failed with outcome
@@ -191,7 +191,7 @@ data SessionEvent
 data SessionLog = SessionLog
   { logScanOutput   :: Text
   , logFindings     :: [Finding]
-  , logAdvice       :: Maybe ClaudeAdvice
+  , logAdvice       :: Maybe AnalysisResult
   , logEvents       :: [SessionEvent]
   , logPlatform     :: PlatformInfo
   } deriving (Show, Eq)
@@ -210,7 +210,7 @@ emptySessionLog = SessionLog
 addEvent :: SessionLog -> SessionEvent -> SessionLog
 addEvent sl ev = sl { logEvents = logEvents sl ++ [ev] }
 
--- | What Claude returns from a refactoring pass
+-- | What the engine returns from a refactoring pass
 data RefactorResult = RefactorResult
   { refactorContributions :: [WikiContribution]
   , refactorDone          :: Bool  -- ^ True if no meaningful improvements found

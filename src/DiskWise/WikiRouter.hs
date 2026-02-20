@@ -6,7 +6,7 @@ module DiskWise.WikiRouter
   , fetchPage
   , matchPages
   , matchPagesHeuristic
-  , matchPagesWithClaude
+  , matchPagesWithEngine
   , createPage
   , updatePage
   , pushContribution
@@ -43,10 +43,10 @@ matchPages = Wiki.matchPages
 matchPagesHeuristic :: [WikiPage] -> [Finding] -> [(WikiPage, [Finding])]
 matchPagesHeuristic = Wiki.matchPagesHeuristic
 
-matchPagesWithClaude :: (T.Text -> T.Text -> IO (Either DiskWiseError T.Text))
+matchPagesWithEngine :: (T.Text -> T.Text -> IO (Either DiskWiseError T.Text))
                      -> [WikiPage] -> [Finding]
                      -> IO [(WikiPage, [Finding])]
-matchPagesWithClaude = Wiki.matchPagesWithClaude
+matchPagesWithEngine = Wiki.matchPagesWithEngine
 
 parsePagePatterns :: T.Text -> [T.Text]
 parsePagePatterns = Wiki.parsePagePatterns

@@ -7,7 +7,7 @@ module DiskWise.Wiki
   , fetchPage
   , matchPages
   , matchPagesHeuristic
-  , matchPagesWithClaude
+  , matchPagesWithEngine
   , createPage
   , updatePage
   , pushContribution
@@ -158,13 +158,13 @@ matchPagesHeuristic pages findings =
   , not (null matched)
   ]
 
--- | Match wiki pages to findings using a Claude call for smarter matching.
--- Falls back to heuristic matching if the Claude call fails.
--- Takes a @callFn@ to avoid circular dependency with Claude module.
-matchPagesWithClaude :: (T.Text -> T.Text -> IO (Either DiskWiseError T.Text))
+-- | Match wiki pages to findings using the engine for smarter matching.
+-- Falls back to heuristic matching if the engine call fails.
+-- Takes a @callFn@ to avoid circular dependency with the Engine module.
+matchPagesWithEngine :: (T.Text -> T.Text -> IO (Either DiskWiseError T.Text))
                      -> [WikiPage] -> [Finding]
                      -> IO [(WikiPage, [Finding])]
-matchPagesWithClaude callFn pages findings = do
+matchPagesWithEngine callFn pages findings = do
   let prompt = buildMatchPromptInternal pages findings
       sysPrompt = "You match wiki pages to filesystem findings. Respond with ONLY valid JSON."
   result <- callFn sysPrompt prompt
@@ -193,7 +193,7 @@ buildMatchPromptInternal pages findings = T.unlines
               | (i, f) <- zip [(0::Int)..] findings ]
   ]
 
--- | Parse Claude's match response into a list of (page_path, [finding_index])
+-- | Parse the engine's match response into a list of (page_path, [finding_index])
 parseMatchResultInternal :: T.Text -> [(FilePath, [Int])]
 parseMatchResultInternal text =
   let jsonText = T.dropWhile (/= '{') text
@@ -211,7 +211,7 @@ parseMatchResultInternal text =
       [ round n | Number n <- V.toList arr ]
     extractIndices _ = []
 
--- | Build the final match result from parsed Claude response
+-- | Build the final match result from parsed engine response
 buildMatchResult :: [WikiPage] -> [Finding] -> [(FilePath, [Int])] -> [(WikiPage, [Finding])]
 buildMatchResult pages findings parsed =
   [ (page, matchedFindings)
@@ -429,7 +429,7 @@ deduplicateContribs pages = map (dedup . resolveRedirect pages)
       | otherwise = contrib
 
 -- | Strip any @\<!-- diskwise-meta: ... --\>@ lines from content.
--- Claude sometimes echoes back meta comments it saw in wiki pages;
+-- The engine sometimes echoes back meta comments it saw in wiki pages;
 -- we strip them so only the authoritative meta line (prepended by
 -- createPage / updatePage) survives.
 stripMetaLines :: T.Text -> T.Text
