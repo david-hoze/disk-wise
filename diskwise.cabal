@@ -26,6 +26,7 @@ library diskwise-lib
     , DiskWise.Scanner
     , DiskWise.CLI
     , DiskWise.Batch
+    , DiskWise.History
   hs-source-dirs:   src
   build-depends:
       base          >= 4.14 && < 5
@@ -55,6 +56,7 @@ test-suite diskwise-tests
     , DiskWise.WikiGistSpec
     , DiskWise.ScannerSpec
     , DiskWise.ClaudeSpec
+    , DiskWise.HistorySpec
   build-depends:
       base          >= 4.14 && < 5
     , diskwise-lib

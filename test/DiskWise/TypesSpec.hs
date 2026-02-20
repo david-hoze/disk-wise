@@ -161,6 +161,20 @@ spec = do
         , outcomeExpected = Just "~500 MB"
         }
 
+  describe "SessionSummary JSON round-trip" $
+    it "session summary" $
+      jsonRoundTrip SessionSummary
+        { summaryTimestamp     = testTime
+        , summaryPlatform      = PlatformInfo "linux" "x86_64" "bash"
+        , summaryFindingCount  = 5
+        , summaryActionsRun    = 3
+        , summaryActionsFailed = 1
+        , summarySkipReasons   = [("Remove dist-newstyle", TooRisky)]
+        , summaryBytesFreed    = Just 524288000
+        , summaryUserFeedback  = Nothing
+        , summaryFailedCmds    = [("docker prune", "permission denied")]
+        }
+
   describe "SessionLog" $ do
     it "starts empty" $ do
       logEvents emptySessionLog `shouldBe` []

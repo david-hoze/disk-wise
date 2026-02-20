@@ -20,6 +20,8 @@ import DiskWise.WikiRouter
 import DiskWise.Claude (investigate, callClaude, buildSystemPrompt, buildLearnPrompt,
                         parseAdvice, agentIdentity, prefixCommitMsg)
 import DiskWise.Scanner
+import DiskWise.History (saveSessionSummary, loadSessionHistory, summarizeSession,
+                         formatSessionHistory)
 
 -- | Main application entry point
 runApp :: AppConfig -> IO ()
@@ -62,6 +64,7 @@ runInvestigate config = do
   platform <- detectPlatform
   sessionRef <- newIORef emptySessionLog { logPlatform = platform }
   identity <- agentIdentity
+  history <- loadSessionHistory
 
   -- Step 1: Scan the system
   TIO.putStrLn "\n-- Scanning system --\n"
@@ -105,7 +108,9 @@ runInvestigate config = do
       -- Step 8: Session-aware learning — ask Claude to review the whole session
       TIO.putStrLn "-- Learning from session --\n"
       session <- readIORef sessionRef
-      learnResult <- callClaude config buildSystemPrompt (buildLearnPrompt session identity)
+      let historyContext = formatSessionHistory history
+      learnResult <- callClaude config buildSystemPrompt
+        (buildLearnPrompt session identity historyContext)
       let allContribs = case learnResult of
             Right text -> case parseAdvice text of
               Right learnAdvice -> adviceContributions advice <> adviceContributions learnAdvice
@@ -117,6 +122,11 @@ runInvestigate config = do
 
       -- Step 10: Post-cleanup feedback check
       postCleanupFeedback sessionRef
+
+      -- Step 11: Save session summary for cross-session learning
+      finalSession <- readIORef sessionRef
+      summary <- summarizeSession finalSession
+      saveSessionSummary summary
 
 -- | Fetch wiki pages, returning empty list on any failure
 fetchWikiGracefully :: AppConfig -> IO [WikiPage]

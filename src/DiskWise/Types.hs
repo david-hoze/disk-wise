@@ -20,6 +20,7 @@ module DiskWise.Types
   , emptySessionLog
   , addEvent
   , RefactorResult(..)
+  , SessionSummary(..)
   ) where
 
 import Data.Aeson
@@ -215,3 +216,19 @@ data RefactorResult = RefactorResult
 
 instance ToJSON RefactorResult
 instance FromJSON RefactorResult
+
+-- | Summary of a session, for cross-session learning
+data SessionSummary = SessionSummary
+  { summaryTimestamp     :: UTCTime
+  , summaryPlatform      :: PlatformInfo
+  , summaryFindingCount  :: Int
+  , summaryActionsRun    :: Int
+  , summaryActionsFailed :: Int
+  , summarySkipReasons   :: [(Text, SkipReason)]  -- ^ (action description, reason)
+  , summaryBytesFreed    :: Maybe Integer
+  , summaryUserFeedback  :: Maybe Text
+  , summaryFailedCmds    :: [(Text, Text)]  -- ^ (command, error)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON SessionSummary
+instance FromJSON SessionSummary

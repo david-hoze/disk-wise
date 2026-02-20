@@ -78,14 +78,14 @@ spec = do
           session = (emptySessionLog { logScanOutput = "scan" })
                       `addEvent` ActionExecuted okOutcome
                       `addEvent` ActionFailed failOutcome
-          prompt = buildLearnPrompt session "agent@test"
+          prompt = buildLearnPrompt session "agent@test" ""
       prompt `shouldSatisfy` T.isInfixOf "EXECUTED"
       prompt `shouldSatisfy` T.isInfixOf "cleaned 500MB"
       prompt `shouldSatisfy` T.isInfixOf "FAILED"
       prompt `shouldSatisfy` T.isInfixOf "permission denied"
 
     it "includes agent identity" $ do
-      let prompt = buildLearnPrompt emptySessionLog "agent@myhost"
+      let prompt = buildLearnPrompt emptySessionLog "agent@myhost" ""
       prompt `shouldSatisfy` T.isInfixOf "agent@myhost"
 
   describe "buildGardenSystemPrompt" $ do

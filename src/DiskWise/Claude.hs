@@ -322,8 +322,8 @@ formatOutcomeHistory page
         <> T.pack (show (pageFailCount page)) <> " failed" ]
 
 -- | Build a learning prompt that includes the full session history
-buildLearnPrompt :: SessionLog -> T.Text -> T.Text
-buildLearnPrompt sessionLog identity =
+buildLearnPrompt :: SessionLog -> T.Text -> T.Text -> T.Text
+buildLearnPrompt sessionLog identity historyContext =
   let plat = logPlatform sessionLog
   in T.unlines $
   [ "== SESSION REVIEW =="
@@ -355,7 +355,8 @@ buildLearnPrompt sessionLog identity =
   , "in the wiki page's ## Platform notes section. Use the format:"
   , "\"On [OS] ([arch]): [observation]\""
   , ""
-  , "USER FEEDBACK IS THE HIGHEST-VALUE SIGNAL. If the user reported a problem:"
+  ] <> (if T.null historyContext then [] else [historyContext]) <>
+  [ "USER FEEDBACK IS THE HIGHEST-VALUE SIGNAL. If the user reported a problem:"
   , "1. Identify which cleanup action likely caused it."
   , "2. Amend the relevant wiki page's \"What's NOT safe to delete\" section."
   , "3. If the action came from a wiki recommendation, add a warning."
