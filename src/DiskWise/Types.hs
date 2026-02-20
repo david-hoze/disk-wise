@@ -149,6 +149,8 @@ data CleanupOutcome = CleanupOutcome
   , outcomeMessage     :: Text
   , outcomeBytesFreed  :: Maybe Integer  -- ^ Measured difference in free space
   , outcomeExpected    :: Maybe Text     -- ^ What the wiki estimated (from actionSizeEstimate)
+  , outcomePosition    :: Int            -- ^ Position in the list of proposed actions (0-indexed)
+  , outcomeOrder       :: Int            -- ^ Actual execution order (0-indexed, among accepted)
   } deriving (Show, Eq, Generic)
 
 instance ToJSON CleanupOutcome

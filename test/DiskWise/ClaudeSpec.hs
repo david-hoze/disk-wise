@@ -73,8 +73,8 @@ spec = do
   describe "buildLearnPrompt" $ do
     it "includes session events" $ do
       let action = CleanupAction "Clean npm" "npm cache clean" "low" Nothing Nothing
-          okOutcome = CleanupOutcome action True "cleaned 500MB" (Just 524288000) Nothing
-          failOutcome = CleanupOutcome action False "permission denied" Nothing Nothing
+          okOutcome = CleanupOutcome action True "cleaned 500MB" (Just 524288000) Nothing 0 0
+          failOutcome = CleanupOutcome action False "permission denied" Nothing Nothing 1 1
           session = (emptySessionLog { logScanOutput = "scan" })
                       `addEvent` ActionExecuted okOutcome
                       `addEvent` ActionFailed failOutcome

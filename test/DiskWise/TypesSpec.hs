@@ -159,6 +159,8 @@ spec = do
         , outcomeMessage = "done"
         , outcomeBytesFreed = Just 524288000
         , outcomeExpected = Just "~500 MB"
+        , outcomePosition = 0
+        , outcomeOrder = 0
         }
 
   describe "SessionSummary JSON round-trip" $
@@ -182,7 +184,7 @@ spec = do
 
     it "tracks events with addEvent" $ do
       let action = CleanupAction "test" "echo hi" "low" Nothing Nothing
-          outcome = CleanupOutcome action True "done" Nothing Nothing
+          outcome = CleanupOutcome action True "done" Nothing Nothing 0 0
           sl = emptySessionLog
                  `addEvent` ActionExecuted outcome
                  `addEvent` ActionSkipped action NotNow

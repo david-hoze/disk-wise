@@ -364,12 +364,15 @@ buildLearnPrompt sessionLog identity historyContext =
   ]
   where
     formatEvent (ActionExecuted outcome) =
-      "EXECUTED: " <> actionDescription (outcomeAction outcome)
+      "EXECUTED (proposed #" <> T.pack (show (outcomePosition outcome + 1))
+      <> ", executed #" <> T.pack (show (outcomeOrder outcome + 1))
+      <> "): " <> actionDescription (outcomeAction outcome)
       <> "\n  Output: " <> outcomeMessage outcome
       <> "\n  Expected: " <> maybe "(unknown)" id (outcomeExpected outcome)
       <> " | Actual freed: " <> maybe "(not measured)" formatBytes (outcomeBytesFreed outcome)
     formatEvent (ActionFailed outcome) =
-      "FAILED: " <> actionDescription (outcomeAction outcome)
+      "FAILED (proposed #" <> T.pack (show (outcomePosition outcome + 1))
+      <> "): " <> actionDescription (outcomeAction outcome)
       <> "\n  Error: " <> outcomeMessage outcome
     formatEvent (ActionSkipped action reason) =
       "SKIPPED by user: " <> actionDescription action

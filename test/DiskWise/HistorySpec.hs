@@ -20,8 +20,8 @@ spec = do
     it "produces correct counts from a mock session log" $ do
       let action1 = CleanupAction "Clean npm" "npm cache clean" "low" (Just "~500 MB") Nothing
           action2 = CleanupAction "Remove logs" "rm -rf /var/log/old" "medium" Nothing Nothing
-          outcome1 = CleanupOutcome action1 True "done" (Just 524288000) (Just "~500 MB")
-          outcome2 = CleanupOutcome action2 False "permission denied" Nothing Nothing
+          outcome1 = CleanupOutcome action1 True "done" (Just 524288000) (Just "~500 MB") 0 0
+          outcome2 = CleanupOutcome action2 False "permission denied" Nothing Nothing 1 1
           session = emptySessionLog
             { logFindings = [Finding "/tmp/x" 1000 "temp" "temp file"]
             , logPlatform = PlatformInfo "linux" "x86_64" "bash"

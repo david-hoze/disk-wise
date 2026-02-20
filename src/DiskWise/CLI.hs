@@ -154,10 +154,12 @@ offerCleanup :: AppConfig -> IORef SessionLog -> [WikiPage] -> [CleanupAction] -
 offerCleanup _ _ _ [] = TIO.putStrLn "No cleanup actions suggested.\n"
 offerCleanup config sessionRef pages actions = do
   TIO.putStrLn $ "-- " <> T.pack (show (length actions)) <> " cleanup action(s) suggested --\n"
-  mapM_ (offerOne config sessionRef pages) actions
+  execCountRef <- newIORef (0 :: Int)
+  mapM_ (\(pos, action) -> offerOne config sessionRef execCountRef pages pos action)
+        (zip [0..] actions)
   TIO.putStrLn ""
   where
-    offerOne cfg ref pgs action = do
+    offerOne cfg ref execRef pgs position action = do
       TIO.putStrLn $ "  Action:   " <> actionDescription action
       TIO.putStrLn $ "  Command:  " <> actionCommand action
       TIO.putStrLn $ "  Risk:     " <> actionRiskLevel action
@@ -177,6 +179,8 @@ offerCleanup config sessionRef pages actions = do
       answer <- getLine
       case answer of
         "y" -> do
+          execOrder <- readIORef execRef
+          modifyIORef execRef (+ 1)
           freeBefore <- measureDiskFree
           result <- runCleanupAction action
           freeAfter <- measureDiskFree
@@ -198,6 +202,8 @@ offerCleanup config sessionRef pages actions = do
                     , outcomeMessage = msg
                     , outcomeBytesFreed = bytesFreed
                     , outcomeExpected = actionSizeEstimate action
+                    , outcomePosition = position
+                    , outcomeOrder = execOrder
                     }
               modifyIORef ref (`addEvent` ActionExecuted outcome)
               case actionWikiRef action of
@@ -211,6 +217,8 @@ offerCleanup config sessionRef pages actions = do
                     , outcomeMessage = err
                     , outcomeBytesFreed = Nothing
                     , outcomeExpected = actionSizeEstimate action
+                    , outcomePosition = position
+                    , outcomeOrder = execOrder
                     }
               modifyIORef ref (`addEvent` ActionFailed outcome)
               case actionWikiRef action of
