@@ -10,7 +10,7 @@ import Test.Hspec
 
 import DiskWise.Types
 import DiskWise.History (summarizeSession, formatSessionHistory, computeSkipPatterns,
-                         computeCommandStats, detectDiminishingReturns)
+                         computeCommandStats, detectDiminishingReturns, computeZeroYieldPaths)
 
 testTime :: UTCTime
 testTime = UTCTime (fromGregorian 2025 1 15) 43200
@@ -189,3 +189,43 @@ spec = do
                        ]
           -- Nothing maps to 0, so this should actually be Just
       detectDiminishingReturns summaries `shouldBe` Just [0, 0, 0]
+
+  describe "computeZeroYieldPaths" $ do
+    let mkSummaryWith cleaned = SessionSummary
+          { summaryTimestamp = testTime
+          , summaryPlatform = PlatformInfo "linux" "x86_64" "bash"
+          , summaryFindingCount = 1, summaryActionsRun = 1, summaryActionsFailed = 0
+          , summarySkipReasons = [], summaryBytesFreed = Just 0
+          , summaryUserFeedback = Nothing, summaryFailedCmds = []
+          , summaryCleanedPaths = cleaned, summarySucceededCmds = []
+          }
+
+    it "identifies paths cleaned 2+ times with avg < 1 MB" $ do
+      let summaries = [ mkSummaryWith [("~/.cache/foo/*", 0)]
+                       , mkSummaryWith [("~/.cache/foo/*", 0)]
+                       ]
+          result = computeZeroYieldPaths summaries
+      result `shouldBe` [("~/.cache/foo/*", 2)]
+
+    it "excludes paths with fewer than 2 cleanings" $ do
+      let summaries = [ mkSummaryWith [("~/.cache/foo/*", 0)] ]
+      computeZeroYieldPaths summaries `shouldBe` []
+
+    it "excludes paths with avg >= 1 MB freed" $ do
+      let summaries = [ mkSummaryWith [("~/.cache/big/*", 2000000)]
+                       , mkSummaryWith [("~/.cache/big/*", 1500000)]
+                       ]
+      computeZeroYieldPaths summaries `shouldBe` []
+
+    it "handles multiple paths across sessions" $ do
+      let summaries = [ mkSummaryWith [("~/a/*", 0), ("~/b/*", 500000)]
+                       , mkSummaryWith [("~/a/*", 28672), ("~/b/*", 400000)]
+                       , mkSummaryWith [("~/a/*", 0)]
+                       ]
+          result = computeZeroYieldPaths summaries
+      -- ~/a/* cleaned 3 times, avg ~9.5 KB -> zero yield
+      -- ~/b/* cleaned 2 times, avg 450 KB -> zero yield
+      length result `shouldBe` 2
+
+    it "returns empty for no history" $ do
+      computeZeroYieldPaths [] `shouldBe` []

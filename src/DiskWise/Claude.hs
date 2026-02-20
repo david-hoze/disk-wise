@@ -65,10 +65,10 @@ prefixCommitMsg msg
 -- | Call Claude to investigate disk usage with wiki context
 investigate :: AppConfig -> T.Text -> [(WikiPage, [Finding])] -> [Finding]
            -> [CommandStats] -> [(FilePath, Integer)] -> [WikiPage] -> [WikiPage]
-           -> Maybe [Integer]
+           -> Maybe [Integer] -> [(T.Text, Int)]
            -> IO (Either DiskWiseError ClaudeAdvice)
-investigate config scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages diminishing = do
-  let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages diminishing
+investigate config scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages diminishing zeroYield = do
+  let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages diminishing zeroYield
       sysPrompt = buildSystemPrompt
   result <- callClaude config sysPrompt userPrompt
   case result of
@@ -255,10 +255,17 @@ buildSystemPrompt = T.unlines
   , "  Do NOT propose cleanup_actions that would remove items explicitly excluded there."
   , "- If a wiki page's \"What's NOT safe to delete\" section lists a path or pattern,"
   , "  do NOT suggest deleting it regardless of how much space it would free."
+  , "- Do NOT propose cleanup_actions for paths listed under ZERO-YIELD PATHS."
+  , "  These have been tried repeatedly and consistently free near-zero space."
   , "- cleanup_actions MUST ONLY contain commands that actually free disk space"
   , "  (rm, cache clean, prune, etc.). Do NOT include diagnostic commands"
   , "  (du, ls, df, find) as cleanup actions. Mention investigation suggestions"
   , "  in the analysis text instead."
+  , "- When DIMINISHING RETURNS is active and the remaining opportunities require"
+  , "  user decisions (e.g., which project's build artifacts to remove), you MAY"
+  , "  include read-only investigation commands (du, find, ls) as cleanup_actions"
+  , "  with risk_level \"investigation\". This surfaces actionable next steps the"
+  , "  user can execute directly instead of burying them in analysis prose."
   , "- If the scan already shows a large reclaimable area, propose a direct"
   , "  cleanup command rather than an investigative command."
   , "- size_estimate MUST reflect the space freed by the exact command, not the"
@@ -320,14 +327,15 @@ buildSystemPrompt = T.unlines
 
 -- | Build the user message with scan output + wiki context + novel findings
 buildPrompt :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> T.Text
-buildPrompt scanOutput matchedPages novelFindings = buildPromptWith scanOutput matchedPages novelFindings [] [] [] [] Nothing
+buildPrompt scanOutput matchedPages novelFindings = buildPromptWith scanOutput matchedPages novelFindings [] [] [] [] Nothing []
 
 -- | Build prompt with optional command reliability stats, previously cleaned paths,
 -- cross-cutting observation pages, full wiki page listing for duplicate prevention,
 -- and diminishing returns data
 buildPromptWith :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> [CommandStats]
-               -> [(FilePath, Integer)] -> [WikiPage] -> [WikiPage] -> Maybe [Integer] -> T.Text
-buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages diminishing = T.unlines $
+               -> [(FilePath, Integer)] -> [WikiPage] -> [WikiPage] -> Maybe [Integer]
+               -> [(T.Text, Int)] -> T.Text
+buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages diminishing zeroYield = T.unlines $
   [ "== SCAN OUTPUT =="
   , scanOutput
   , ""
@@ -352,6 +360,14 @@ buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned obser
         , "These paths were cleaned in a recent session. Avoid re-suggesting them"
         , "unless the scan shows they have significantly regrown."
         ] <> map formatPrevCleaned prevCleaned <> [""]
+  ) <>
+  (if null zeroYield then []
+   else [ "== ZERO-YIELD PATHS (do not propose) =="
+        , "These paths have been cleaned before but consistently freed < 1 MB:"
+        ] <> map formatZeroYield zeroYield <>
+        [ "Do NOT propose cleanup_actions targeting these paths."
+        , ""
+        ]
   ) <>
   (if null observationPages then []
    else [ "== CROSS-CUTTING WIKI RULES =="
@@ -386,6 +402,8 @@ buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned obser
       [ "--- " <> T.pack (pageRelPath page) <> " ---"
       , pageBody page
       ]
+    formatZeroYield (path, count) =
+      "- " <> path <> " (cleaned " <> T.pack (show count) <> " times, avg 0 MB)"
     formatPrevCleaned (path, bytes) =
       "- " <> T.pack path <> " (freed " <> formatBytes bytes <> ")"
     formatMatchedPage (page, findings) =

@@ -23,7 +23,7 @@ import DiskWise.Claude (investigate, callClaude, buildSystemPrompt, buildLearnPr
 import DiskWise.Scanner
 import DiskWise.History (saveSessionSummary, loadSessionHistory, loadMostRecentSummary,
                          summarizeSession, formatSessionHistory, computeCommandStats,
-                         detectDiminishingReturns)
+                         detectDiminishingReturns, computeZeroYieldPaths)
 
 -- | Main application entry point
 runApp :: AppConfig -> IO ()
@@ -108,7 +108,8 @@ runInvestigate config = do
   let cmdStats = computeCommandStats history
       prevCleaned = maybe [] summaryCleanedPaths prevSummary
       diminishing = detectDiminishingReturns history
-  result <- investigate config scanOutput matched novelFindings cmdStats prevCleaned observationPages wikiPages diminishing
+      zeroYield = computeZeroYieldPaths history
+  result <- investigate config scanOutput matched novelFindings cmdStats prevCleaned observationPages wikiPages diminishing zeroYield
   case result of
     Left err -> TIO.putStrLn $ "Error: " <> T.pack (show err)
     Right advice -> do
@@ -124,8 +125,10 @@ runInvestigate config = do
       do session' <- readIORef sessionRef
          let executed = [() | ActionExecuted _ <- logEvents session']
              proposed = adviceCleanupActions advice
+             allZeroYield = not (null executed)
+               && all (== 0) [b | ActionExecuted o <- logEvents session', Just b <- [outcomeBytesFreed o]]
              steadyState = case diminishing of
-               Just _  -> null proposed || null executed
+               Just _  -> null proposed || null executed || allZeroYield
                Nothing -> False
          when steadyState $ do
            TIO.putStrLn "-- Steady state --\n"

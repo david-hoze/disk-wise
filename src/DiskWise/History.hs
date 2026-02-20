@@ -10,6 +10,7 @@ module DiskWise.History
   , computeSkipPatterns
   , computeCommandStats
   , detectDiminishingReturns
+  , computeZeroYieldPaths
   ) where
 
 import Control.Exception (catch, SomeException)
@@ -213,6 +214,25 @@ computeCommandStats summaries =
         }
      | cmd <- allCmds
      , Map.findWithDefault 0 cmd successes + Map.findWithDefault 0 cmd failCounts >= 2
+     ]
+
+-- | Identify paths that have been cleaned multiple times but consistently freed near-zero space.
+-- Returns [(path, sessionCount)] for paths cleaned ≥2 times with avg < 1 MB freed.
+computeZeroYieldPaths :: [SessionSummary] -> [(T.Text, Int)]
+computeZeroYieldPaths summaries =
+  let -- Collect (path, bytesFreed) across all sessions
+      allCleaned = [ (T.pack path, bytes)
+                   | s <- summaries
+                   , (path, bytes) <- summaryCleanedPaths s
+                   ]
+      -- Group by path: Map path [(bytes)]
+      grouped = Map.fromListWith (++) [ (p, [b]) | (p, b) <- allCleaned ]
+      -- Filter: count ≥ 2 AND average < 1 MB
+      threshold = 1048576  -- 1 MB
+  in [ (path, length bytesFreedList)
+     | (path, bytesFreedList) <- Map.toList grouped
+     , length bytesFreedList >= 2
+     , sum bytesFreedList `div` fromIntegral (length bytesFreedList) < threshold
      ]
 
 -- | Detect if recent sessions show diminishing returns for cache cleanups.

@@ -112,40 +112,40 @@ spec = do
   describe "buildPromptWith previously cleaned paths" $ do
     it "includes PREVIOUSLY CLEANED section when paths are non-empty" $ do
       let prompt = buildPromptWith "scan output" [] [] []
-                     [("/home/.npm", 524288000), ("/home/.cache", 1073741824)] [] [] Nothing
+                     [("/home/.npm", 524288000), ("/home/.cache", 1073741824)] [] [] Nothing []
       prompt `shouldSatisfy` T.isInfixOf "PREVIOUSLY CLEANED"
       prompt `shouldSatisfy` T.isInfixOf "/home/.npm"
       prompt `shouldSatisfy` T.isInfixOf "/home/.cache"
 
     it "omits PREVIOUSLY CLEANED section when paths are empty" $ do
-      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing []
       prompt `shouldSatisfy` (not . T.isInfixOf "PREVIOUSLY CLEANED")
 
   describe "buildPromptWith observation pages" $ do
     it "includes CROSS-CUTTING WIKI RULES when observation pages are non-empty" $ do
       let obsPage = WikiPage "observations/skip-patterns-windows.md" "skip-patterns"
                       "Skip Patterns" "Do NOT delete .blend files" "sha" Nothing 0 0
-          prompt = buildPromptWith "scan output" [] [] [] [] [obsPage] [] Nothing
+          prompt = buildPromptWith "scan output" [] [] [] [] [obsPage] [] Nothing []
       prompt `shouldSatisfy` T.isInfixOf "CROSS-CUTTING WIKI RULES"
       prompt `shouldSatisfy` T.isInfixOf "HARD CONSTRAINTS"
       prompt `shouldSatisfy` T.isInfixOf "Do NOT delete .blend files"
       prompt `shouldSatisfy` T.isInfixOf "observations/skip-patterns-windows.md"
 
     it "omits CROSS-CUTTING WIKI RULES when observation pages are empty" $ do
-      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing []
       prompt `shouldSatisfy` (not . T.isInfixOf "CROSS-CUTTING WIKI RULES")
 
   describe "buildPromptWith existing wiki pages" $ do
     it "includes EXISTING WIKI PAGES when allPages is non-empty" $ do
       let page = WikiPage "tools/npm.md" "npm" "npm cleanup"
                    "# npm" "sha" Nothing 0 0
-          prompt = buildPromptWith "scan output" [] [] [] [] [] [page] Nothing
+          prompt = buildPromptWith "scan output" [] [] [] [] [] [page] Nothing []
       prompt `shouldSatisfy` T.isInfixOf "EXISTING WIKI PAGES"
       prompt `shouldSatisfy` T.isInfixOf "tools/npm.md"
       prompt `shouldSatisfy` T.isInfixOf "npm cleanup"
 
     it "omits EXISTING WIKI PAGES when allPages is empty" $ do
-      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing []
       prompt `shouldSatisfy` (not . T.isInfixOf "EXISTING WIKI PAGES")
 
   describe "buildLearnPrompt" $ do
@@ -340,14 +340,37 @@ spec = do
         Right r -> refactorDone r `shouldBe` True
         Left err -> expectationFailure $ "Parse failed: " <> show err
 
+  describe "buildPromptWith zero-yield paths" $ do
+    it "includes ZERO-YIELD PATHS when non-empty" $ do
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing
+                     [("~/.cache/foo/*", 3), ("~/ghcup/cache/*", 2)]
+      prompt `shouldSatisfy` T.isInfixOf "ZERO-YIELD PATHS"
+      prompt `shouldSatisfy` T.isInfixOf "~/.cache/foo/*"
+      prompt `shouldSatisfy` T.isInfixOf "cleaned 3 times"
+      prompt `shouldSatisfy` T.isInfixOf "~/ghcup/cache/*"
+      prompt `shouldSatisfy` T.isInfixOf "Do NOT propose cleanup_actions targeting these paths"
+
+    it "omits ZERO-YIELD PATHS when empty" $ do
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing []
+      prompt `shouldSatisfy` (not . T.isInfixOf "ZERO-YIELD PATHS")
+
+  describe "buildSystemPrompt zero-yield and investigation guidance" $ do
+    it "includes zero-yield guidance" $ do
+      buildSystemPrompt `shouldSatisfy` T.isInfixOf "ZERO-YIELD PATHS"
+
+    it "includes investigation command guidance for diminishing returns" $ do
+      let prompt = buildSystemPrompt
+      prompt `shouldSatisfy` T.isInfixOf "investigation"
+      prompt `shouldSatisfy` T.isInfixOf "DIMINISHING RETURNS"
+
   describe "buildPromptWith diminishing returns" $ do
     it "includes DIMINISHING RETURNS when Just" $ do
-      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] (Just [0, 0, 0])
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] (Just [0, 0, 0]) []
       prompt `shouldSatisfy` T.isInfixOf "DIMINISHING RETURNS"
       prompt `shouldSatisfy` T.isInfixOf "all under 10 MB"
 
     it "omits DIMINISHING RETURNS when Nothing" $ do
-      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] [] Nothing []
       prompt `shouldSatisfy` (not . T.isInfixOf "DIMINISHING RETURNS")
 
   describe "buildLearnPrompt diminishing returns" $ do
