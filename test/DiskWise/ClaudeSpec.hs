@@ -49,6 +49,16 @@ spec = do
       prompt `shouldSatisfy` T.isInfixOf "exact command"
       prompt `shouldSatisfy` T.isInfixOf "size_estimate MUST reflect the space freed"
 
+    it "includes CreatePage duplicate prevention guidance" $ do
+      let prompt = buildSystemPrompt
+      prompt `shouldSatisfy` T.isInfixOf "EXISTING WIKI PAGES"
+      prompt `shouldSatisfy` T.isInfixOf "propose AmendPage instead"
+
+    it "includes alternative command guidance" $ do
+      let prompt = buildSystemPrompt
+      prompt `shouldSatisfy` T.isInfixOf "alternative command"
+      prompt `shouldSatisfy` T.isInfixOf "Do NOT omit the cleanup just because the original approach is unreliable"
+
   describe "buildPrompt" $ do
     it "includes scan output" $ do
       let prompt = buildPrompt "scan data here" [] []
@@ -89,28 +99,41 @@ spec = do
   describe "buildPromptWith previously cleaned paths" $ do
     it "includes PREVIOUSLY CLEANED section when paths are non-empty" $ do
       let prompt = buildPromptWith "scan output" [] [] []
-                     [("/home/.npm", 524288000), ("/home/.cache", 1073741824)] []
+                     [("/home/.npm", 524288000), ("/home/.cache", 1073741824)] [] []
       prompt `shouldSatisfy` T.isInfixOf "PREVIOUSLY CLEANED"
       prompt `shouldSatisfy` T.isInfixOf "/home/.npm"
       prompt `shouldSatisfy` T.isInfixOf "/home/.cache"
 
     it "omits PREVIOUSLY CLEANED section when paths are empty" $ do
-      let prompt = buildPromptWith "scan output" [] [] [] [] []
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] []
       prompt `shouldSatisfy` (not . T.isInfixOf "PREVIOUSLY CLEANED")
 
   describe "buildPromptWith observation pages" $ do
     it "includes CROSS-CUTTING WIKI RULES when observation pages are non-empty" $ do
       let obsPage = WikiPage "observations/skip-patterns-windows.md" "skip-patterns"
                       "Skip Patterns" "Do NOT delete .blend files" "sha" Nothing 0 0
-          prompt = buildPromptWith "scan output" [] [] [] [] [obsPage]
+          prompt = buildPromptWith "scan output" [] [] [] [] [obsPage] []
       prompt `shouldSatisfy` T.isInfixOf "CROSS-CUTTING WIKI RULES"
       prompt `shouldSatisfy` T.isInfixOf "HARD CONSTRAINTS"
       prompt `shouldSatisfy` T.isInfixOf "Do NOT delete .blend files"
       prompt `shouldSatisfy` T.isInfixOf "observations/skip-patterns-windows.md"
 
     it "omits CROSS-CUTTING WIKI RULES when observation pages are empty" $ do
-      let prompt = buildPromptWith "scan output" [] [] [] [] []
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] []
       prompt `shouldSatisfy` (not . T.isInfixOf "CROSS-CUTTING WIKI RULES")
+
+  describe "buildPromptWith existing wiki pages" $ do
+    it "includes EXISTING WIKI PAGES when allPages is non-empty" $ do
+      let page = WikiPage "tools/npm.md" "npm" "npm cleanup"
+                   "# npm" "sha" Nothing 0 0
+          prompt = buildPromptWith "scan output" [] [] [] [] [] [page]
+      prompt `shouldSatisfy` T.isInfixOf "EXISTING WIKI PAGES"
+      prompt `shouldSatisfy` T.isInfixOf "tools/npm.md"
+      prompt `shouldSatisfy` T.isInfixOf "npm cleanup"
+
+    it "omits EXISTING WIKI PAGES when allPages is empty" $ do
+      let prompt = buildPromptWith "scan output" [] [] [] [] [] []
+      prompt `shouldSatisfy` (not . T.isInfixOf "EXISTING WIKI PAGES")
 
   describe "buildLearnPrompt" $ do
     it "includes session events" $ do
@@ -120,15 +143,27 @@ spec = do
           session = (emptySessionLog { logScanOutput = "scan" })
                       `addEvent` ActionExecuted okOutcome
                       `addEvent` ActionFailed failOutcome
-          prompt = buildLearnPrompt session "agent@test" ""
+          prompt = buildLearnPrompt session "agent@test" "" []
       prompt `shouldSatisfy` T.isInfixOf "EXECUTED"
       prompt `shouldSatisfy` T.isInfixOf "cleaned 500MB"
       prompt `shouldSatisfy` T.isInfixOf "FAILED"
       prompt `shouldSatisfy` T.isInfixOf "permission denied"
 
     it "includes agent identity" $ do
-      let prompt = buildLearnPrompt emptySessionLog "agent@myhost" ""
+      let prompt = buildLearnPrompt emptySessionLog "agent@myhost" "" []
       prompt `shouldSatisfy` T.isInfixOf "agent@myhost"
+
+    it "includes EXISTING WIKI PAGES when pages are provided" $ do
+      let page = WikiPage "platform/mingw64-temp-files.md" "temp" "MinGW64 Temp Files"
+                   "# Temp" "sha" Nothing 0 0
+          prompt = buildLearnPrompt emptySessionLog "agent@test" "" [page]
+      prompt `shouldSatisfy` T.isInfixOf "EXISTING WIKI PAGES"
+      prompt `shouldSatisfy` T.isInfixOf "platform/mingw64-temp-files.md"
+      prompt `shouldSatisfy` T.isInfixOf "MinGW64 Temp Files"
+
+    it "omits EXISTING WIKI PAGES when no pages" $ do
+      let prompt = buildLearnPrompt emptySessionLog "agent@test" "" []
+      prompt `shouldSatisfy` (not . T.isInfixOf "EXISTING WIKI PAGES")
 
   describe "buildGardenSystemPrompt" $ do
     it "mentions _meta/ notes" $ do

@@ -55,6 +55,7 @@ mainLoop config = do
       runInvestigate config
       mainLoop config
     "q" -> TIO.putStrLn "Goodbye!"
+    "\\q" -> TIO.putStrLn "Goodbye!"
     _   -> do
       TIO.putStrLn "Unknown option, try again."
       mainLoop config
@@ -105,7 +106,7 @@ runInvestigate config = do
   TIO.putStrLn "-- Asking Claude to analyze --\n"
   let cmdStats = computeCommandStats history
       prevCleaned = maybe [] summaryCleanedPaths prevSummary
-  result <- investigate config scanOutput matched novelFindings cmdStats prevCleaned observationPages
+  result <- investigate config scanOutput matched novelFindings cmdStats prevCleaned observationPages wikiPages
   case result of
     Left err -> TIO.putStrLn $ "Error: " <> T.pack (show err)
     Right advice -> do
@@ -128,7 +129,7 @@ runInvestigate config = do
                        <> (if T.null regrowthReport then "" else "\n" <> regrowthReport)
                        <> (if T.null cmdStatsText then "" else "\n" <> cmdStatsText)
       learnResult <- callClaude config buildSystemPrompt
-        (buildLearnPrompt session identity historyContext)
+        (buildLearnPrompt session identity historyContext wikiPages)
       let allContribs = case learnResult of
             Right text -> case parseAdvice text of
               Right learnAdvice -> adviceContributions advice <> adviceContributions learnAdvice

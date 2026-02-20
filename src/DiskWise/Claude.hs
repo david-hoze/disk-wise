@@ -64,10 +64,10 @@ prefixCommitMsg msg
 
 -- | Call Claude to investigate disk usage with wiki context
 investigate :: AppConfig -> T.Text -> [(WikiPage, [Finding])] -> [Finding]
-           -> [CommandStats] -> [(FilePath, Integer)] -> [WikiPage]
+           -> [CommandStats] -> [(FilePath, Integer)] -> [WikiPage] -> [WikiPage]
            -> IO (Either DiskWiseError ClaudeAdvice)
-investigate config scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages = do
-  let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages
+investigate config scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages = do
+  let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages
       sysPrompt = buildSystemPrompt
   result <- callClaude config sysPrompt userPrompt
   case result of
@@ -269,6 +269,13 @@ buildSystemPrompt = T.unlines
   , "- Replace absolute home paths with ~ in wiki content"
   , "- NEVER include usernames, secrets, tokens, or personal data in wiki content"
   , "- Do NOT re-document patterns already well-covered by existing wiki pages"
+  , "- Before proposing a CreatePage contribution, check EXISTING WIKI PAGES."
+  , "  If a page on the same tool or topic already exists, propose AmendPage instead."
+  , "  Do NOT create a new page when an existing page covers the same subject,"
+  , "  even if it has a different path or category prefix."
+  , "- If a wiki page documents that a command fails on the current platform and"
+  , "  provides an alternative command, propose the alternative as a cleanup action."
+  , "  Do NOT omit the cleanup just because the original approach is unreliable."
   , ""
   , "When contributing to the wiki, focus on OBSERVATIONS FROM THIS SPECIFIC SYSTEM:"
   , "- Actual sizes you measured (not typical ranges from general knowledge)"
@@ -302,13 +309,13 @@ buildSystemPrompt = T.unlines
 
 -- | Build the user message with scan output + wiki context + novel findings
 buildPrompt :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> T.Text
-buildPrompt scanOutput matchedPages novelFindings = buildPromptWith scanOutput matchedPages novelFindings [] [] []
+buildPrompt scanOutput matchedPages novelFindings = buildPromptWith scanOutput matchedPages novelFindings [] [] [] []
 
 -- | Build prompt with optional command reliability stats, previously cleaned paths,
--- and cross-cutting observation pages
+-- cross-cutting observation pages, and full wiki page listing for duplicate prevention
 buildPromptWith :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> [CommandStats]
-               -> [(FilePath, Integer)] -> [WikiPage] -> T.Text
-buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages = T.unlines $
+               -> [(FilePath, Integer)] -> [WikiPage] -> [WikiPage] -> T.Text
+buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages allPages = T.unlines $
   [ "== SCAN OUTPUT =="
   , scanOutput
   , ""
@@ -339,8 +346,16 @@ buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned obser
         , "The following observation pages apply across all findings."
         , "Treat any prohibitions as HARD CONSTRAINTS — do NOT propose cleanup for excluded items."
         ] <> concatMap formatObservationPage observationPages <> [""]
+  ) <>
+  (if null allPages then []
+   else [ "== EXISTING WIKI PAGES =="
+        , "Before proposing a CreatePage, check this list. If a page on a similar topic"
+        , "exists, use AmendPage to add to it instead."
+        ] <> map formatPageListing allPages <> [""]
   )
   where
+    formatPageListing page =
+      "- " <> T.pack (pageRelPath page) <> " — " <> pageTitle page
     formatObservationPage page =
       [ "--- " <> T.pack (pageRelPath page) <> " ---"
       , pageBody page
@@ -365,8 +380,8 @@ formatOutcomeHistory page
         <> T.pack (show (pageFailCount page)) <> " failed" ]
 
 -- | Build a learning prompt that includes the full session history
-buildLearnPrompt :: SessionLog -> T.Text -> T.Text -> T.Text
-buildLearnPrompt sessionLog identity historyContext =
+buildLearnPrompt :: SessionLog -> T.Text -> T.Text -> [WikiPage] -> T.Text
+buildLearnPrompt sessionLog identity historyContext allPages =
   let plat = logPlatform sessionLog
   in T.unlines $
   [ "== SESSION REVIEW =="
@@ -399,6 +414,12 @@ buildLearnPrompt sessionLog identity historyContext =
   , "\"On [OS] ([arch]): [observation]\""
   , ""
   ] <> (if T.null historyContext then [] else [historyContext]) <>
+  (if null allPages then []
+   else [ "== EXISTING WIKI PAGES =="
+        , "Before proposing a CreatePage, check this list. If a page on a similar topic"
+        , "exists, use AmendPage to add to it instead."
+        ] <> map formatLearnPageListing allPages <> [""]
+  ) <>
   [ "USER FEEDBACK IS THE HIGHEST-VALUE SIGNAL. If the user reported a problem:"
   , "1. Identify which cleanup action likely caused it."
   , "2. Amend the relevant wiki page's \"What's NOT safe to delete\" section."
@@ -432,6 +453,8 @@ buildLearnPrompt sessionLog identity historyContext =
       "WIKI FAILED: " <> T.pack (contribPath contrib) <> " — " <> err
     formatEvent (UserFeedback feedback) =
       "USER FEEDBACK: \"" <> feedback <> "\""
+    formatLearnPageListing page =
+      "- " <> T.pack (pageRelPath page) <> " — " <> pageTitle page
 
 -- | Format a byte count as a human-readable string
 formatBytes :: Integer -> T.Text
