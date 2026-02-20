@@ -4,6 +4,7 @@
 module DiskWise.CLI
   ( runApp
   , runInvestigate
+  , deduplicateContribs
   ) where
 
 import Control.Exception (catch, SomeException)
@@ -184,7 +185,8 @@ offerLearn _ _ _ [] = do
   TIO.putStrLn "No wiki contributions suggested.\n"
   pure []
 offerLearn config sessionRef pages contribs = do
-  let filtered = filter (\c -> not (T.isPrefixOf "_meta/" (T.pack (contribPath c)))) contribs
+  let deduped = deduplicateContribs pages contribs
+      filtered = filter (\c -> not (T.isPrefixOf "_meta/" (T.pack (contribPath c)))) deduped
   TIO.putStrLn $ "-- " <> T.pack (show (length filtered))
               <> " wiki contribution(s) suggested --\n"
   pushed <- mapM (offerOne config sessionRef pages) filtered
@@ -285,3 +287,4 @@ when False _      = pure ()
 
 unless :: Bool -> IO () -> IO ()
 unless b = when (not b)
+

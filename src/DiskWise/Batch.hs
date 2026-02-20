@@ -69,7 +69,9 @@ batchAnalyze config scanFile = do
           hPutStrLn stderr $ "Claude error: " <> show err
           BLC.putStrLn $ encode $ object [ "error" .= T.pack (show err) ]
         Right advice ->
-          BLC.putStrLn $ encode advice
+          let deduped = advice { adviceContributions =
+                deduplicateContribs wikiPages (adviceContributions advice) }
+          in BLC.putStrLn $ encode deduped
 
 -- | Execute a single cleanup action from JSON argument
 -- Input:  JSON string of a CleanupAction

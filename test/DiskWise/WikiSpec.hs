@@ -7,7 +7,8 @@ import Test.Hspec
 
 import DiskWise.Types
 import DiskWise.Wiki (matchPages, matchPagesHeuristic, parsePagePatterns, parsePageToolNames,
-                      parseMetaComment, renderMetaComment, PageMeta(..))
+                      parseMetaComment, renderMetaComment, PageMeta(..),
+                      deduplicateContribs)
 
 -- | Helper to make a wiki page for testing
 mkPage :: FilePath -> T.Text -> T.Text -> T.Text -> WikiPage
@@ -145,3 +146,40 @@ spec = do
           (meta, _) = parseMetaComment rendered
       metaVerifyCount meta `shouldBe` 5
       metaFailCount meta `shouldBe` 2
+
+  describe "deduplicateContribs" $ do
+    it "converts CreatePage to AmendPage when path already exists" $ do
+      let page = mkPage "tools/npm.md" "npm" "npm" "# npm\nExisting content"
+          contrib = WikiContribution
+            { contribType    = CreatePage
+            , contribPath    = "tools/npm.md"
+            , contribContent = "New observations about npm"
+            , contribSummary = "add npm page"
+            }
+          [result] = deduplicateContribs [page] [contrib]
+      contribType result `shouldBe` AmendPage
+      contribContent result `shouldSatisfy` T.isInfixOf "Existing content"
+      contribContent result `shouldSatisfy` T.isInfixOf "New observations about npm"
+
+    it "leaves CreatePage unchanged when path is new" $ do
+      let page = mkPage "tools/npm.md" "npm" "npm" "# npm"
+          contrib = WikiContribution
+            { contribType    = CreatePage
+            , contribPath    = "tools/yarn.md"
+            , contribContent = "# Yarn\nNew page"
+            , contribSummary = "add yarn page"
+            }
+          [result] = deduplicateContribs [page] [contrib]
+      contribType result `shouldBe` CreatePage
+
+    it "leaves AmendPage contributions unchanged" $ do
+      let page = mkPage "tools/npm.md" "npm" "npm" "# npm"
+          contrib = WikiContribution
+            { contribType    = AmendPage
+            , contribPath    = "tools/npm.md"
+            , contribContent = "Updated content"
+            , contribSummary = "update npm"
+            }
+          [result] = deduplicateContribs [page] [contrib]
+      contribType result `shouldBe` AmendPage
+      contribContent result `shouldBe` "Updated content"

@@ -20,6 +20,7 @@ module DiskWise.Wiki
   , recordOutcome
   , PageMeta(..)
   , defaultPageMeta
+  , deduplicateContribs
   ) where
 
 import Control.Concurrent (threadDelay)
@@ -351,6 +352,23 @@ recordOutcome config pages wikiRef success = do
       pure ()
     [] -> pure ()
   `catch` (\(_ :: SomeException) -> pure ())
+
+-- | Deduplicate contributions: convert CreatePage to AmendPage when the path
+-- already exists in the wiki, appending the new content to the existing body.
+deduplicateContribs :: [WikiPage] -> [WikiContribution] -> [WikiContribution]
+deduplicateContribs pages = map dedup
+  where
+    existingPaths = map pageRelPath pages
+    dedup contrib
+      | contribType contrib == CreatePage
+      , contribPath contrib `elem` existingPaths
+      = case filter (\p -> pageRelPath p == contribPath contrib) pages of
+          (existing:_) -> contrib
+            { contribType = AmendPage
+            , contribContent = pageBody existing <> "\n\n" <> contribContent contrib
+            }
+          [] -> contrib
+      | otherwise = contrib
 
 -- | Replace home directory paths with ~ and strip usernames (pure version)
 -- Takes the home directory as a parameter for testability
