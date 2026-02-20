@@ -44,6 +44,10 @@ Each wiki contribution is presented to the user with type, path, summary, and a 
 - `[y]` Approve and push as-is
 - `[n]` Skip (recorded as `ContribSkipped`)
 - `[e]` Edit first (recorded as `ContribEdited`)
+- `[a]` Approve all remaining contributions without further prompts
+- `[s]` Skip all remaining contributions without further prompts
+
+When the user picks `[a]` or `[s]`, all subsequent contributions in the session are automatically approved or skipped (shown as `[auto-approve]` or `[auto-skip]`).
 
 Failed pushes are saved to `~/.diskwise/pending/` and retried at the start of the next session.
 

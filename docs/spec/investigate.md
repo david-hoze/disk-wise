@@ -16,8 +16,8 @@ When the user runs the tool:
 
 7. **Act**: The user sees the advice and decides what to act on (see [Act](act.md)).
 
-8. **Learn**: Claude reviews the session and drafts wiki contributions (see [Learn](learn.md)).
+8. **Feedback**: If any actions were executed, the agent asks whether anything broke or behaved unexpectedly. This runs before the learn step so that user-reported breakage is visible to Claude when drafting wiki contributions.
 
-9. **Feedback**: If any actions were executed, the agent asks whether anything broke or behaved unexpectedly.
+9. **Learn**: Claude reviews the session (including any feedback) and drafts wiki contributions (see [Learn](learn.md)).
 
 10. **Persist**: The agent summarizes the session and appends it to the local history file for cross-session learning.
