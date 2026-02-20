@@ -120,26 +120,51 @@ runInvestigate config = do
       -- Step 7: Offer cleanup actions (tracking results in session)
       offerCleanup config sessionRef wikiPages (adviceCleanupActions advice)
 
-      -- Step 8: Post-cleanup feedback (before learning so feedback is visible)
+      -- Step 8: Detect steady state
+      do session' <- readIORef sessionRef
+         let executed = [() | ActionExecuted _ <- logEvents session']
+             proposed = adviceCleanupActions advice
+             steadyState = case diminishing of
+               Just _  -> null proposed || null executed
+               Nothing -> False
+         when steadyState $ do
+           TIO.putStrLn "-- Steady state --\n"
+           TIO.putStrLn "Safe automated cleanup has been exhausted on this system."
+           TIO.putStrLn "Remaining space recovery requires decisions only you can make:"
+           TIO.putStrLn "  - Remove build artifacts from specific projects"
+           TIO.putStrLn "  - Uninstall tools or SDKs you no longer use"
+           TIO.putStrLn "  - Move large files to external storage"
+           TIO.putStrLn ""
+           TIO.putStrLn "Run diskwise again after making changes or installing new software.\n"
+
+      -- Step 9: Post-cleanup feedback (before learning so feedback is visible)
       postCleanupFeedback sessionRef
 
-      -- Step 9: Session-aware learning — ask Claude to review the whole session
-      TIO.putStrLn "-- Learning from session --\n"
-      session <- readIORef sessionRef
-      let cmdStatsText = formatCommandStats cmdStats
-          historyContext = formatSessionHistory history
-                       <> (if T.null regrowthReport then "" else "\n" <> regrowthReport)
-                       <> (if T.null cmdStatsText then "" else "\n" <> cmdStatsText)
-      learnResult <- callClaude config buildSystemPrompt
-        (buildLearnPrompt session identity historyContext wikiPages diminishing)
-      let allContribs = case learnResult of
-            Right text -> case parseAdvice text of
-              Right learnAdvice -> adviceContributions advice <> adviceContributions learnAdvice
-              Left _ -> adviceContributions advice
-            Left _ -> adviceContributions advice
-
-      -- Step 10: Offer wiki contributions
-      _ <- offerLearn config sessionRef wikiPages allContribs
+      -- Step 10: Session-aware learning
+      -- Skip learn phase when diminishing returns are active — the wiki
+      -- is already well-populated and further contributions add noise.
+      case diminishing of
+        Just _ -> do
+          TIO.putStrLn "-- Skipping learning phase (diminishing returns active) --\n"
+          -- Still offer investigate-phase contributions (usually 0-1)
+          _ <- offerLearn config sessionRef wikiPages (adviceContributions advice)
+          pure ()
+        Nothing -> do
+          TIO.putStrLn "-- Learning from session --\n"
+          session' <- readIORef sessionRef
+          let cmdStatsText = formatCommandStats cmdStats
+              historyContext = formatSessionHistory history
+                           <> (if T.null regrowthReport then "" else "\n" <> regrowthReport)
+                           <> (if T.null cmdStatsText then "" else "\n" <> cmdStatsText)
+          learnResult <- callClaude config buildSystemPrompt
+            (buildLearnPrompt session' identity historyContext wikiPages diminishing)
+          let allContribs = case learnResult of
+                Right text -> case parseAdvice text of
+                  Right learnAdvice -> adviceContributions advice <> adviceContributions learnAdvice
+                  Left _ -> adviceContributions advice
+                Left _ -> adviceContributions advice
+          _ <- offerLearn config sessionRef wikiPages allContribs
+          pure ()
 
       -- Step 11: Save session summary for cross-session learning
       finalSession <- readIORef sessionRef
