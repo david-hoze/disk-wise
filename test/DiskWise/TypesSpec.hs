@@ -130,6 +130,13 @@ spec = do
         , refactorSummary = "Improved npm page clarity"
         }
 
+  describe "SkipReason JSON round-trip" $ do
+    it "TooRisky" $ jsonRoundTrip TooRisky
+    it "NotNow" $ jsonRoundTrip NotNow
+    it "AlreadyHandled" $ jsonRoundTrip AlreadyHandled
+    it "NotApplicable" $ jsonRoundTrip NotApplicable
+    it "SkipReasonOther" $ jsonRoundTrip (SkipReasonOther "custom reason")
+
   describe "SessionLog" $ do
     it "starts empty" $ do
       logEvents emptySessionLog `shouldBe` []
@@ -139,5 +146,5 @@ spec = do
       let action = CleanupAction "test" "echo hi" "low" Nothing Nothing
           sl = emptySessionLog
                  `addEvent` ActionExecuted action "done"
-                 `addEvent` ActionSkipped action
+                 `addEvent` ActionSkipped action NotNow
       length (logEvents sl) `shouldBe` 2

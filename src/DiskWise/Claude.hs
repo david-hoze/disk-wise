@@ -347,12 +347,21 @@ buildLearnPrompt sessionLog identity = T.unlines $
       "EXECUTED: " <> actionDescription action <> "\n  Output: " <> output
     formatEvent (ActionFailed action err) =
       "FAILED: " <> actionDescription action <> "\n  Error: " <> err
-    formatEvent (ActionSkipped action) =
+    formatEvent (ActionSkipped action reason) =
       "SKIPPED by user: " <> actionDescription action
+      <> " (reason: " <> formatSkipReason reason <> ")"
     formatEvent (ContribPushed contrib) =
       "WIKI PUSHED: " <> T.pack (contribPath contrib)
     formatEvent (ContribFailed contrib err) =
       "WIKI FAILED: " <> T.pack (contribPath contrib) <> " — " <> err
+
+-- | Format a skip reason for display in prompts
+formatSkipReason :: SkipReason -> T.Text
+formatSkipReason TooRisky            = "too risky"
+formatSkipReason NotNow              = "not now"
+formatSkipReason AlreadyHandled      = "already handled"
+formatSkipReason NotApplicable       = "not applicable"
+formatSkipReason (SkipReasonOther t) = t
 
 -- | Build the gardener-specific system prompt
 buildGardenSystemPrompt :: T.Text

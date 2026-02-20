@@ -179,8 +179,9 @@ offerCleanup config sessionRef pages actions = do
                 Just wref -> recordOutcome cfg pgs (T.unpack wref) False
                 Nothing   -> pure ()
         _ -> do
+          reason <- askSkipReason
           TIO.putStrLn "  Skipped."
-          modifyIORef ref (`addEvent` ActionSkipped action)
+          modifyIORef ref (`addEvent` ActionSkipped action reason)
       TIO.putStrLn ""
 
 -- | Offer wiki contributions for approval and push. Returns paths that were pushed.
@@ -282,6 +283,20 @@ savePending contrib = do
   TIO.writeFile filename (contribContent contrib)
   where
     sanitizeFilename = map (\c -> if c == '/' then '_' else c)
+
+-- | Ask the user why they skipped a cleanup action
+askSkipReason :: IO SkipReason
+askSkipReason = do
+  TIO.putStr "  Why skip? [r] too risky  [l] later  [d] already done  [n] doesn't apply  [enter] no reason > "
+  hFlush stdout
+  answer <- getLine
+  pure $ case answer of
+    "r" -> TooRisky
+    "l" -> NotNow
+    "d" -> AlreadyHandled
+    "n" -> NotApplicable
+    ""  -> NotNow
+    s   -> SkipReasonOther (T.pack s)
 
 -- helpers
 

@@ -11,6 +11,7 @@ module DiskWise.Types
   , Finding(..)
   , AppConfig(..)
   , DiskWiseError(..)
+  , SkipReason(..)
   , SessionEvent(..)
   , SessionLog(..)
   , emptySessionLog
@@ -125,11 +126,23 @@ data DiskWiseError
   | WikiNotAvailable
   deriving (Show, Eq)
 
+-- | Reason the user skipped a cleanup action
+data SkipReason
+  = TooRisky
+  | NotNow
+  | AlreadyHandled
+  | NotApplicable
+  | SkipReasonOther Text
+  deriving (Show, Eq, Generic)
+
+instance ToJSON SkipReason
+instance FromJSON SkipReason
+
 -- | An event that occurred during the session, for Claude to learn from
 data SessionEvent
   = ActionExecuted CleanupAction Text   -- ^ action + output
   | ActionFailed CleanupAction Text     -- ^ action + error message
-  | ActionSkipped CleanupAction         -- ^ user declined
+  | ActionSkipped CleanupAction SkipReason -- ^ user declined + reason
   | ContribPushed WikiContribution      -- ^ successfully pushed to wiki
   | ContribFailed WikiContribution Text -- ^ failed to push + error
   deriving (Show, Eq)
