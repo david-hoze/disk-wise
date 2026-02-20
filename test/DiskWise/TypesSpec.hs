@@ -137,6 +137,11 @@ spec = do
     it "NotApplicable" $ jsonRoundTrip NotApplicable
     it "SkipReasonOther" $ jsonRoundTrip (SkipReasonOther "custom reason")
 
+  describe "ContribDecision JSON round-trip" $ do
+    it "ContribApproved" $ jsonRoundTrip ContribApproved
+    it "ContribSkipped" $ jsonRoundTrip ContribSkipped
+    it "ContribEdited" $ jsonRoundTrip (ContribEdited "user edited content")
+
   describe "PlatformInfo JSON round-trip" $
     it "platform info" $
       jsonRoundTrip PlatformInfo

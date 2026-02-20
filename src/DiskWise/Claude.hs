@@ -367,8 +367,14 @@ buildLearnPrompt sessionLog identity =
     formatEvent (ActionSkipped action reason) =
       "SKIPPED by user: " <> actionDescription action
       <> " (reason: " <> formatSkipReason reason <> ")"
-    formatEvent (ContribPushed contrib) =
-      "WIKI PUSHED: " <> T.pack (contribPath contrib)
+    formatEvent (ContribPushed contrib decision) =
+      case decision of
+        ContribApproved ->
+          "WIKI PUSHED: " <> T.pack (contribPath contrib) <> " (user approved without edits)"
+        ContribEdited note ->
+          "WIKI PUSHED: " <> T.pack (contribPath contrib) <> " (user edited: " <> note <> ")"
+        ContribSkipped ->
+          "WIKI SKIPPED: " <> T.pack (contribPath contrib)
     formatEvent (ContribFailed contrib err) =
       "WIKI FAILED: " <> T.pack (contribPath contrib) <> " — " <> err
 

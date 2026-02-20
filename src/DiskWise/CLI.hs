@@ -235,7 +235,7 @@ offerLearn config sessionRef pages contribs = do
       when (length (T.lines (contribContent prefixed)) > 10) $
         TIO.putStrLn "    ..."
 
-      TIO.putStr "  Push to wiki? [y/n] > "
+      TIO.putStr "  Push to wiki? [y] yes  [n] skip  [e] edit first > "
       hFlush stdout
       answer <- getLine
       case answer of
@@ -244,7 +244,7 @@ offerLearn config sessionRef pages contribs = do
           case result of
             Right () -> do
               TIO.putStrLn "  OK: Contribution pushed to wiki."
-              modifyIORef ref (`addEvent` ContribPushed prefixed)
+              modifyIORef ref (`addEvent` ContribPushed prefixed ContribApproved)
               pure (Just (contribPath prefixed))
             Left err -> do
               TIO.putStrLn $ "  Error: " <> T.pack (show err)
@@ -252,8 +252,24 @@ offerLearn config sessionRef pages contribs = do
               savePending prefixed
               modifyIORef ref (`addEvent` ContribFailed prefixed (T.pack (show err)))
               pure Nothing
+        "e" -> do
+          TIO.putStrLn "  Editing is not yet supported in this terminal."
+          TIO.putStrLn "  Pushing original content."
+          result <- pushContribution cfg pgs prefixed
+          case result of
+            Right () -> do
+              TIO.putStrLn "  OK: Contribution pushed to wiki."
+              modifyIORef ref (`addEvent` ContribPushed prefixed
+                (ContribEdited "user requested edit"))
+              pure (Just (contribPath prefixed))
+            Left err -> do
+              TIO.putStrLn $ "  Error: " <> T.pack (show err)
+              savePending prefixed
+              modifyIORef ref (`addEvent` ContribFailed prefixed (T.pack (show err)))
+              pure Nothing
         _ -> do
           TIO.putStrLn "  Skipped."
+          modifyIORef ref (`addEvent` ContribPushed prefixed ContribSkipped)
           pure Nothing
 
 -- | Retry pending contributions from previous sessions

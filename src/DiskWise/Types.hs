@@ -14,6 +14,7 @@ module DiskWise.Types
   , SkipReason(..)
   , CleanupOutcome(..)
   , PlatformInfo(..)
+  , ContribDecision(..)
   , SessionEvent(..)
   , SessionLog(..)
   , emptySessionLog
@@ -162,12 +163,22 @@ data PlatformInfo = PlatformInfo
 instance ToJSON PlatformInfo
 instance FromJSON PlatformInfo
 
+-- | How the user decided on a wiki contribution
+data ContribDecision
+  = ContribApproved
+  | ContribSkipped
+  | ContribEdited Text  -- ^ The user's modification note
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ContribDecision
+instance FromJSON ContribDecision
+
 -- | An event that occurred during the session, for Claude to learn from
 data SessionEvent
   = ActionExecuted CleanupOutcome       -- ^ action executed with outcome
   | ActionFailed CleanupOutcome         -- ^ action failed with outcome
   | ActionSkipped CleanupAction SkipReason -- ^ user declined + reason
-  | ContribPushed WikiContribution      -- ^ successfully pushed to wiki
+  | ContribPushed WikiContribution ContribDecision -- ^ pushed + how user decided
   | ContribFailed WikiContribution Text -- ^ failed to push + error
   deriving (Show, Eq)
 
