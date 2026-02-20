@@ -64,7 +64,7 @@ batchAnalyze config scanFile = do
 
       -- Call Claude
       hPutStrLn stderr "Calling Claude..."
-      result <- investigate config scanOutput matched novel
+      result <- investigate config scanOutput matched novel []
       case result of
         Left err -> do
           hPutStrLn stderr $ "Claude error: " <> show err

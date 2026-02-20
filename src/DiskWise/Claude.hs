@@ -8,6 +8,7 @@ module DiskWise.Claude
   , callClaudeApi
   , callClaudeGarden
   , buildPrompt
+  , buildPromptWith
   , buildSystemPrompt
   , buildLearnPrompt
   , buildGardenSystemPrompt
@@ -18,6 +19,7 @@ module DiskWise.Claude
   , prefixCommitMsg
   , prefixGardenerMsg
   , extractJson
+  , formatCommandStats
   ) where
 
 import Control.Exception (catch, SomeException, try)
@@ -62,9 +64,9 @@ prefixCommitMsg msg
 
 -- | Call Claude to investigate disk usage with wiki context
 investigate :: AppConfig -> T.Text -> [(WikiPage, [Finding])] -> [Finding]
-           -> IO (Either DiskWiseError ClaudeAdvice)
-investigate config scanOutput matchedPages novelFindings = do
-  let userPrompt = buildPrompt scanOutput matchedPages novelFindings
+           -> [CommandStats] -> IO (Either DiskWiseError ClaudeAdvice)
+investigate config scanOutput matchedPages novelFindings cmdStats = do
+  let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats
       sysPrompt = buildSystemPrompt
   result <- callClaude config sysPrompt userPrompt
   case result of
@@ -286,7 +288,11 @@ buildSystemPrompt = T.unlines
 
 -- | Build the user message with scan output + wiki context + novel findings
 buildPrompt :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> T.Text
-buildPrompt scanOutput matchedPages novelFindings = T.unlines $
+buildPrompt scanOutput matchedPages novelFindings = buildPromptWith scanOutput matchedPages novelFindings []
+
+-- | Build prompt with optional command reliability stats
+buildPromptWith :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> [CommandStats] -> T.Text
+buildPromptWith scanOutput matchedPages novelFindings cmdStats = T.unlines $
   [ "== SCAN OUTPUT =="
   , scanOutput
   , ""
@@ -302,6 +308,9 @@ buildPrompt scanOutput matchedPages novelFindings = T.unlines $
    else [ "== NOVEL FINDINGS (not covered by wiki) ==" ] <>
         map formatNovelFinding novelFindings <>
         ["", "Pay special attention to novel findings — consider creating wiki pages for them."]
+  ) <>
+  (let statsText = formatCommandStats cmdStats
+   in if T.null statsText then [] else [statsText]
   )
   where
     formatMatchedPage (page, findings) =
@@ -405,6 +414,30 @@ formatSkipReason NotNow              = "not now"
 formatSkipReason AlreadyHandled      = "already handled"
 formatSkipReason NotApplicable       = "not applicable"
 formatSkipReason (SkipReasonOther t) = t
+
+-- | Format command reliability statistics for inclusion in prompts
+formatCommandStats :: [CommandStats] -> T.Text
+formatCommandStats [] = ""
+formatCommandStats stats = T.unlines $
+  [ "== COMMAND RELIABILITY =="
+  , "Cross-session statistics for cleanup commands:"
+  ] <> map formatOne stats <>
+  [ ""
+  , "If a command fails frequently, consider:"
+  , "- Adding platform-specific notes to its wiki page"
+  , "- Suggesting an alternative command"
+  , "- Raising the risk level if it's unreliable"
+  ]
+  where
+    formatOne cs =
+      let total = cmdStatsSuccesses cs + cmdStatsFailures cs
+          rate = if total > 0
+                 then (cmdStatsSuccesses cs * 100) `div` total
+                 else 0
+      in "- `" <> cmdStatsCommand cs <> "`: "
+         <> T.pack (show (cmdStatsSuccesses cs)) <> "/" <> T.pack (show total)
+         <> " succeeded (" <> T.pack (show rate) <> "% reliable)"
+         <> maybe "" (\e -> "\n  Last error: " <> e) (cmdStatsLastError cs)
 
 -- | Build the gardener-specific system prompt
 buildGardenSystemPrompt :: T.Text

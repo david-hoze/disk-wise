@@ -8,6 +8,7 @@ module DiskWise.History
   , summarizeSession
   , formatSessionHistory
   , computeSkipPatterns
+  , computeCommandStats
   ) where
 
 import Control.Exception (catch, SomeException)
@@ -68,6 +69,10 @@ summarizeSession sessionLog = do
                              , Just b <- [outcomeBytesFreed o]
                              , let path = extractPath (actionCommand (outcomeAction o))
                              , not (null path)
+                             ]
+    , summarySucceededCmds = [ actionCommand (outcomeAction o)
+                             | ActionExecuted o <- logEvents sessionLog
+                             , outcomeSuccess o
                              ]
     }
 
@@ -176,3 +181,33 @@ extractPath cmd =
   in case paths of
     (p:_) -> T.unpack p
     []    -> ""
+
+-- | Compute command reliability statistics across all sessions.
+computeCommandStats :: [SessionSummary] -> [CommandStats]
+computeCommandStats summaries =
+  let -- Collect all successes and failures per command
+      successes = Map.fromListWith (+)
+        [ (cmd, 1 :: Int)
+        | s <- summaries
+        , cmd <- summarySucceededCmds s
+        ]
+      failures = Map.fromListWith (\new old -> new) -- keep most recent error
+        [ (cmd, (1 :: Int, err))
+        | s <- summaries
+        , (cmd, err) <- summaryFailedCmds s
+        ]
+      failCounts = Map.fromListWith (+)
+        [ (cmd, 1 :: Int)
+        | s <- summaries
+        , (cmd, _) <- summaryFailedCmds s
+        ]
+      allCmds = Map.keys (Map.union successes failCounts)
+  in [ CommandStats
+        { cmdStatsCommand   = cmd
+        , cmdStatsSuccesses = Map.findWithDefault 0 cmd successes
+        , cmdStatsFailures  = Map.findWithDefault 0 cmd failCounts
+        , cmdStatsLastError = fmap snd (Map.lookup cmd failures)
+        }
+     | cmd <- allCmds
+     , Map.findWithDefault 0 cmd successes + Map.findWithDefault 0 cmd failCounts >= 2
+     ]

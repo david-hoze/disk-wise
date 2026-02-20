@@ -176,6 +176,7 @@ spec = do
         , summaryUserFeedback  = Nothing
         , summaryFailedCmds    = [("docker prune", "permission denied")]
         , summaryCleanedPaths  = [("/home/.cache/npm", 524288000)]
+        , summarySucceededCmds = ["npm cache clean --force"]
         }
 
   describe "SessionLog" $ do
@@ -190,3 +191,12 @@ spec = do
                  `addEvent` ActionExecuted outcome
                  `addEvent` ActionSkipped action NotNow
       length (logEvents sl) `shouldBe` 2
+
+  describe "CommandStats JSON round-trip" $
+    it "command stats" $
+      jsonRoundTrip CommandStats
+        { cmdStatsCommand   = "npm cache clean"
+        , cmdStatsSuccesses = 5
+        , cmdStatsFailures  = 1
+        , cmdStatsLastError = Just "permission denied"
+        }

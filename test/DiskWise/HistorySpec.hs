@@ -9,7 +9,8 @@ import System.IO (hPutStrLn, hClose, openTempFile)
 import Test.Hspec
 
 import DiskWise.Types
-import DiskWise.History (summarizeSession, formatSessionHistory, computeSkipPatterns)
+import DiskWise.History (summarizeSession, formatSessionHistory, computeSkipPatterns,
+                         computeCommandStats)
 
 testTime :: UTCTime
 testTime = UTCTime (fromGregorian 2025 1 15) 43200
@@ -72,6 +73,7 @@ spec = do
             , summaryUserFeedback  = Nothing
             , summaryFailedCmds    = []
             , summaryCleanedPaths  = []
+            , summarySucceededCmds = []
             }
           formatted = formatSessionHistory [summary]
       formatted `shouldSatisfy` (/= "")
@@ -89,6 +91,7 @@ spec = do
             , summaryUserFeedback  = Nothing
             , summaryFailedCmds    = []
             , summaryCleanedPaths  = []
+            , summarySucceededCmds = []
             }
           summary2 = summary1
             { summarySkipReasons = [ ("Remove dist-newstyle", TooRisky)
@@ -110,6 +113,43 @@ spec = do
             , summaryFindingCount = 0, summaryActionsRun = 0, summaryActionsFailed = 0
             , summarySkipReasons = [], summaryBytesFreed = Nothing
             , summaryUserFeedback = Nothing, summaryFailedCmds = []
-            , summaryCleanedPaths = []
+            , summaryCleanedPaths = [], summarySucceededCmds = []
             }
       computeSkipPatterns [summary] `shouldBe` []
+
+  describe "computeCommandStats" $ do
+    it "aggregates command successes and failures across sessions" $ do
+      let summary1 = SessionSummary
+            { summaryTimestamp = testTime
+            , summaryPlatform = PlatformInfo "linux" "x86_64" "bash"
+            , summaryFindingCount = 1, summaryActionsRun = 1, summaryActionsFailed = 0
+            , summarySkipReasons = [], summaryBytesFreed = Nothing
+            , summaryUserFeedback = Nothing
+            , summaryFailedCmds = []
+            , summaryCleanedPaths = [], summarySucceededCmds = ["npm cache clean"]
+            }
+          summary2 = summary1
+            { summaryFailedCmds = [("npm cache clean", "permission denied")]
+            , summarySucceededCmds = []
+            }
+          stats = computeCommandStats [summary1, summary2]
+      length stats `shouldBe` 1
+      case stats of
+        [s] -> do
+          cmdStatsCommand s `shouldBe` "npm cache clean"
+          cmdStatsSuccesses s `shouldBe` 1
+          cmdStatsFailures s `shouldBe` 1
+          cmdStatsLastError s `shouldBe` Just "permission denied"
+        _ -> expectationFailure "Expected one command stat"
+
+    it "only includes commands with 2+ occurrences" $ do
+      let summary = SessionSummary
+            { summaryTimestamp = testTime
+            , summaryPlatform = PlatformInfo "linux" "x86_64" "bash"
+            , summaryFindingCount = 1, summaryActionsRun = 1, summaryActionsFailed = 0
+            , summarySkipReasons = [], summaryBytesFreed = Nothing
+            , summaryUserFeedback = Nothing
+            , summaryFailedCmds = []
+            , summaryCleanedPaths = [], summarySucceededCmds = ["npm cache clean"]
+            }
+      computeCommandStats [summary] `shouldBe` []

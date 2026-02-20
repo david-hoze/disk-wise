@@ -21,6 +21,7 @@ module DiskWise.Types
   , addEvent
   , RefactorResult(..)
   , SessionSummary(..)
+  , CommandStats(..)
   ) where
 
 import Data.Aeson
@@ -231,7 +232,19 @@ data SessionSummary = SessionSummary
   , summaryUserFeedback  :: Maybe Text
   , summaryFailedCmds    :: [(Text, Text)]  -- ^ (command, error)
   , summaryCleanedPaths  :: [(FilePath, Integer)]  -- ^ (path, bytes freed) for regrowth tracking
+  , summarySucceededCmds :: [Text]  -- ^ Commands that succeeded (for reliability tracking)
   } deriving (Show, Eq, Generic)
 
 instance ToJSON SessionSummary
 instance FromJSON SessionSummary
+
+-- | Aggregated reliability statistics for a cleanup command
+data CommandStats = CommandStats
+  { cmdStatsCommand  :: Text   -- ^ The command string
+  , cmdStatsSuccesses :: Int   -- ^ Times it succeeded
+  , cmdStatsFailures  :: Int   -- ^ Times it failed
+  , cmdStatsLastError :: Maybe Text  -- ^ Most recent error message
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CommandStats
+instance FromJSON CommandStats

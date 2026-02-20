@@ -18,10 +18,10 @@ import System.IO (hFlush, stdout, hSetBuffering, stdin, BufferMode(..))
 import DiskWise.Types
 import DiskWise.WikiRouter
 import DiskWise.Claude (investigate, callClaude, buildSystemPrompt, buildLearnPrompt,
-                        parseAdvice, agentIdentity, prefixCommitMsg)
+                        parseAdvice, agentIdentity, prefixCommitMsg, formatCommandStats)
 import DiskWise.Scanner
 import DiskWise.History (saveSessionSummary, loadSessionHistory, loadMostRecentSummary,
-                         summarizeSession, formatSessionHistory)
+                         summarizeSession, formatSessionHistory, computeCommandStats)
 
 -- | Main application entry point
 runApp :: AppConfig -> IO ()
@@ -98,7 +98,8 @@ runInvestigate config = do
 
   -- Step 5: Call Claude for investigation
   TIO.putStrLn "-- Asking Claude to analyze --\n"
-  result <- investigate config scanOutput matched novelFindings
+  let cmdStats = computeCommandStats history
+  result <- investigate config scanOutput matched novelFindings cmdStats
   case result of
     Left err -> TIO.putStrLn $ "Error: " <> T.pack (show err)
     Right advice -> do
@@ -113,8 +114,10 @@ runInvestigate config = do
       -- Step 8: Session-aware learning — ask Claude to review the whole session
       TIO.putStrLn "-- Learning from session --\n"
       session <- readIORef sessionRef
-      let historyContext = formatSessionHistory history
+      let cmdStatsText = formatCommandStats cmdStats
+          historyContext = formatSessionHistory history
                        <> (if T.null regrowthReport then "" else "\n" <> regrowthReport)
+                       <> (if T.null cmdStatsText then "" else "\n" <> cmdStatsText)
       learnResult <- callClaude config buildSystemPrompt
         (buildLearnPrompt session identity historyContext)
       let allContribs = case learnResult of
