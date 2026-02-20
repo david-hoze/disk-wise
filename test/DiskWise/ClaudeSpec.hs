@@ -30,8 +30,8 @@ spec = do
 
     it "includes contribution guidance" $ do
       let prompt = buildSystemPrompt
-      prompt `shouldSatisfy` T.isInfixOf "diskwise-agent:"
-      prompt `shouldSatisfy` T.isInfixOf "bar for contributing is LOW"
+      prompt `shouldSatisfy` T.isInfixOf "OBSERVATIONS FROM THIS SPECIFIC SYSTEM"
+      prompt `shouldSatisfy` T.isInfixOf "Do NOT write generic tool documentation"
 
   describe "buildPrompt" $ do
     it "includes scan output" $ do
