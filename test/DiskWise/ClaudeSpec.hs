@@ -49,6 +49,21 @@ spec = do
     it "shows placeholder when no wiki pages" $ do
       buildPrompt "scan output" [] [] `shouldSatisfy` T.isInfixOf "No wiki pages available"
 
+    it "includes outcome history when page has verify/fail counts" $ do
+      let page = WikiPage "tools/npm.md" "npm" "npm"
+                   "# npm" "sha" Nothing 5 2
+          finding = Finding "/home/.npm" 1000000 "cache" "npm cache"
+          prompt = buildPrompt "scan output" [(page, [finding])] []
+      prompt `shouldSatisfy` T.isInfixOf "5 verified"
+      prompt `shouldSatisfy` T.isInfixOf "2 failed"
+
+    it "omits outcome history when counts are zero" $ do
+      let page = WikiPage "tools/npm.md" "npm" "npm"
+                   "# npm" "sha" Nothing 0 0
+          finding = Finding "/home/.npm" 1000000 "cache" "npm cache"
+          prompt = buildPrompt "scan output" [(page, [finding])] []
+      prompt `shouldSatisfy` (not . T.isInfixOf "verified")
+
     it "includes novel findings section" $ do
       let finding = Finding "/tmp/big" 5000000000 "temp" "5GB temp file"
           prompt = buildPrompt "scan output" [] [finding]
@@ -89,6 +104,12 @@ spec = do
       prompt `shouldSatisfy` T.isInfixOf "# npm content"
       prompt `shouldSatisfy` T.isInfixOf "META PAGES"
       prompt `shouldSatisfy` T.isInfixOf "# gardener notes"
+
+    it "includes outcome history in garden prompt" $ do
+      let page = WikiPage "tools/npm.md" "npm" "npm" "# npm" "sha" Nothing 3 1
+          prompt = buildGardenPrompt [page] [] "agent@x"
+      prompt `shouldSatisfy` T.isInfixOf "3 verified"
+      prompt `shouldSatisfy` T.isInfixOf "1 failed"
 
     it "shows first session message when no meta pages" $ do
       let contentPage = WikiPage "tools/npm.md" "npm" "npm" "# npm" "sha" Nothing 0 0

@@ -308,10 +308,18 @@ buildPrompt scanOutput matchedPages novelFindings = T.unlines $
       [ "--- " <> pageTitle page <> " (" <> T.pack (pageRelPath page) <> ") ---"
       , pageBody page
       , "Matched findings: " <> T.pack (show (length findings))
-      , ""
-      ]
+      ] <> formatOutcomeHistory page <>
+      [ "" ]
     formatNovelFinding f =
       "- " <> findingSummary f <> " [" <> findingCategory f <> "]"
+
+-- | Format outcome history for a wiki page (verify/fail counts)
+formatOutcomeHistory :: WikiPage -> [T.Text]
+formatOutcomeHistory page
+  | pageVerifyCount page == 0 && pageFailCount page == 0 = []
+  | otherwise =
+      [ "Outcome history: " <> T.pack (show (pageVerifyCount page)) <> " verified, "
+        <> T.pack (show (pageFailCount page)) <> " failed" ]
 
 -- | Build a learning prompt that includes the full session history
 buildLearnPrompt :: SessionLog -> T.Text -> T.Text
@@ -414,8 +422,8 @@ buildGardenPrompt contentPages metaPages identity = T.unlines $
     formatPage page =
       [ "--- " <> T.pack (pageRelPath page) <> " ---"
       , pageBody page
-      , ""
-      ]
+      ] <> formatOutcomeHistory page <>
+      [ "" ]
 
 -- | Parse Claude's JSON response into ClaudeAdvice
 parseAdvice :: T.Text -> Either DiskWiseError ClaudeAdvice
