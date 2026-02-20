@@ -18,7 +18,7 @@ spec = do
             , "500M\t/home/user/.cache/pip"
             , ""
             ]
-          findings = parseFindings output
+          findings = parseFindings 0 output
       length findings `shouldBe` 2
       findingPath (head findings) `shouldBe` "/home/user/.npm"
       findingCategory (head findings) `shouldBe` "package-manager"
@@ -30,7 +30,7 @@ spec = do
             , "300M\t/home/user/project/dist-newstyle"
             , "50M\t/tmp/scratch"
             ]
-          findings = parseFindings output
+          findings = parseFindings 0 output
           cats = map findingCategory findings
       cats `shouldBe` ["cache", "log", "build-artifact", "temp"]
 
@@ -41,12 +41,12 @@ spec = do
             , "100M\t/some/path"
             , ""
             ]
-          findings = parseFindings output
+          findings = parseFindings 0 output
       length findings `shouldBe` 1
 
     it "returns empty list for unparseable input" $ do
       let output = "This is just text with no tab-separated sizes\n"
-          findings = parseFindings output
+          findings = parseFindings 0 output
       findings `shouldBe` []
 
     it "parses various size suffixes" $ do
@@ -55,10 +55,22 @@ spec = do
             , "2.5G\t/big/file"
             , "1T\t/huge/file"
             ]
-          findings = parseFindings output
+          findings = parseFindings 0 output
       length findings `shouldBe` 3
       findingSize (findings !! 0) `shouldBe` round (15 * 1024 :: Double)
       findingSize (findings !! 1) `shouldBe` round (2.5 * 1024 * 1024 * 1024 :: Double)
+
+    it "filters out findings below minimum size threshold" $ do
+      let output = T.unlines
+            [ "1.2G\t/home/user/.npm"
+            , "500M\t/home/user/.cache/pip"
+            , "15K\t/small/file"
+            ]
+          minBytes = 100 * 1024 * 1024  -- 100 MB
+          findings = parseFindings minBytes output
+      length findings `shouldBe` 2
+      findingPath (head findings) `shouldBe` "/home/user/.npm"
+      findingPath (findings !! 1) `shouldBe` "/home/user/.cache/pip"
 
   describe "toMingwPath" $ do
     it "converts Windows backslash paths" $ do

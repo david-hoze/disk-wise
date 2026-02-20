@@ -83,9 +83,11 @@ runCleanupAction action = do
                                    <> "\n" <> T.pack out)
     ExitFailure _ -> pure $ Left (T.pack err <> T.pack out)
 
--- | Best-effort parsing of scan output (du/find lines) into structured findings
-parseFindings :: T.Text -> [Finding]
-parseFindings scanOutput =
+-- | Best-effort parsing of scan output (du/find lines) into structured findings.
+-- The @minBytes@ parameter filters out findings smaller than the threshold.
+parseFindings :: Integer -> T.Text -> [Finding]
+parseFindings minBytes scanOutput =
+  filter (\f -> findingSize f >= minBytes) $
   concatMap parseLine (T.lines scanOutput)
   where
     parseLine line

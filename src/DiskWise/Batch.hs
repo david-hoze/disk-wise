@@ -27,7 +27,8 @@ batchScan :: AppConfig -> IO ()
 batchScan config = do
   hPutStrLn stderr "Scanning system..."
   scanOutput <- scanSystem config
-  let findings = parseFindings scanOutput
+  let minBytes = configMinSizeMB config * 1024 * 1024
+      findings = parseFindings minBytes scanOutput
   hPutStrLn stderr $ "Found " <> show (length findings) <> " items."
   BLC.putStrLn $ encode $ object
     [ "scan_output" .= scanOutput

@@ -67,7 +67,8 @@ runInvestigate config = do
   modifyIORef sessionRef (\s -> s { logScanOutput = scanOutput })
 
   -- Step 2: Parse findings
-  let findings = parseFindings scanOutput
+  let minBytes = configMinSizeMB config * 1024 * 1024
+      findings = parseFindings minBytes scanOutput
   modifyIORef sessionRef (\s -> s { logFindings = findings })
   TIO.putStrLn $ "Found " <> T.pack (show (length findings)) <> " items of interest.\n"
 
