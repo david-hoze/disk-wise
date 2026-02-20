@@ -9,6 +9,7 @@ module DiskWise.CLI
 
 import Control.Exception (catch, SomeException)
 import Data.IORef
+import Data.List (isPrefixOf, partition)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import System.Directory (createDirectoryIfMissing, getHomeDirectory,
@@ -86,8 +87,12 @@ runInvestigate config = do
   TIO.putStrLn "-- Fetching wiki knowledge --\n"
   wikiPages <- fetchWikiGracefully config
 
-  -- Step 4: Match pages to findings (Claude-assisted, with heuristic fallback)
-  matched <- matchPagesWithClaude (callClaude config) wikiPages findings
+  -- Step 4: Separate observation pages (hard constraints) from tool pages
+  let isObservationPage p = "observations/" `isPrefixOf` pageRelPath p
+      (observationPages, toolPages) = partition isObservationPage wikiPages
+
+  -- Step 4b: Match tool pages to findings (Claude-assisted, with heuristic fallback)
+  matched <- matchPagesWithClaude (callClaude config) toolPages findings
   let matchedFindingPaths = concatMap (map findingPath . snd) matched
       novelFindings = filter (\f -> findingPath f `notElem` matchedFindingPaths) findings
 
@@ -100,7 +105,7 @@ runInvestigate config = do
   TIO.putStrLn "-- Asking Claude to analyze --\n"
   let cmdStats = computeCommandStats history
       prevCleaned = maybe [] summaryCleanedPaths prevSummary
-  result <- investigate config scanOutput matched novelFindings cmdStats prevCleaned
+  result <- investigate config scanOutput matched novelFindings cmdStats prevCleaned observationPages
   case result of
     Left err -> TIO.putStrLn $ "Error: " <> T.pack (show err)
     Right advice -> do
@@ -184,11 +189,19 @@ offerCleanup config sessionRef pages actions = do
       vr <- validateAction action
       mapM_ (\w -> TIO.putStrLn $ "  WARNING: " <> w) (validationWarnings vr)
 
-      TIO.putStr "  Execute? [y/n] > "
-      hFlush stdout
-      answer <- getLine
-      case answer of
-        "y" -> do
+      let promptExecute = do
+            TIO.putStr "  Execute? [y/n] > "
+            hFlush stdout
+            answer <- getLine
+            case answer of
+              "y" -> pure True
+              "n" -> pure False
+              _   -> do
+                TIO.putStrLn "  Please enter y or n."
+                promptExecute
+      execute <- promptExecute
+      if execute
+        then do
           execOrder <- readIORef execRef
           modifyIORef execRef (+ 1)
           freeBefore <- measureDiskFree
@@ -234,7 +247,7 @@ offerCleanup config sessionRef pages actions = do
               case actionWikiRef action of
                 Just wref -> recordOutcome cfg pgs (T.unpack wref) False
                 Nothing   -> pure ()
-        _ -> do
+        else do
           reason <- askSkipReason
           TIO.putStrLn "  Skipped."
           modifyIORef ref (`addEvent` ActionSkipped action reason)
@@ -253,11 +266,13 @@ offerLearn config sessionRef pages contribs = do
               <> " wiki contribution(s) suggested --\n"
   -- Nothing = ask each, Just True = approve all, Just False = skip all
   batchRef <- newIORef (Nothing :: Maybe Bool)
-  pushed <- mapM (offerOne config sessionRef batchRef pages) filtered
+  let totalCount = length filtered
+  pushed <- mapM (\(idx, c) -> offerOne config sessionRef batchRef pages idx totalCount c)
+                 (zip [0..] filtered)
   TIO.putStrLn ""
   pure [p | Just p <- pushed]
   where
-    offerOne cfg ref batchRef pgs contrib = do
+    offerOne cfg ref batchRef pgs idx totalCount contrib = do
       let prefixed = contrib { contribSummary = prefixCommitMsg (contribSummary contrib) }
       TIO.putStrLn $ "  Type:    " <> T.pack (show (contribType prefixed))
       TIO.putStrLn $ "  Path:    " <> T.pack (contribPath prefixed)
@@ -283,8 +298,19 @@ offerLearn config sessionRef pages contribs = do
 
       case answer of
         "a" -> do
-          writeIORef batchRef (Just True)
-          pushOne cfg ref pgs prefixed
+          let remaining = totalCount - idx
+          TIO.putStr $ "  Approve all " <> T.pack (show remaining)
+                    <> " remaining contribution(s)? [y/n] > "
+          hFlush stdout
+          confirm <- getLine
+          if confirm == "y"
+            then do
+              writeIORef batchRef (Just True)
+              pushOne cfg ref pgs prefixed
+            else do
+              TIO.putStrLn "  Skipped (staying in per-item mode)."
+              modifyIORef ref (`addEvent` ContribPushed prefixed ContribSkipped)
+              pure Nothing
         "s" -> do
           writeIORef batchRef (Just False)
           TIO.putStrLn "  Skipped."

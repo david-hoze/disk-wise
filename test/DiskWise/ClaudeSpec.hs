@@ -39,6 +39,16 @@ spec = do
       prompt `shouldSatisfy` T.isInfixOf "diagnostic"
       prompt `shouldSatisfy` T.isInfixOf "Do NOT include diagnostic commands"
 
+    it "includes HARD CONSTRAINT language for wiki rules" $ do
+      let prompt = buildSystemPrompt
+      prompt `shouldSatisfy` T.isInfixOf "HARD CONSTRAINT"
+      prompt `shouldSatisfy` T.isInfixOf "Do NOT propose cleanup_actions that would remove items explicitly excluded"
+
+    it "includes exact command scope guidance for size estimates" $ do
+      let prompt = buildSystemPrompt
+      prompt `shouldSatisfy` T.isInfixOf "exact command"
+      prompt `shouldSatisfy` T.isInfixOf "size_estimate MUST reflect the space freed"
+
   describe "buildPrompt" $ do
     it "includes scan output" $ do
       let prompt = buildPrompt "scan data here" [] []
@@ -79,14 +89,28 @@ spec = do
   describe "buildPromptWith previously cleaned paths" $ do
     it "includes PREVIOUSLY CLEANED section when paths are non-empty" $ do
       let prompt = buildPromptWith "scan output" [] [] []
-                     [("/home/.npm", 524288000), ("/home/.cache", 1073741824)]
+                     [("/home/.npm", 524288000), ("/home/.cache", 1073741824)] []
       prompt `shouldSatisfy` T.isInfixOf "PREVIOUSLY CLEANED"
       prompt `shouldSatisfy` T.isInfixOf "/home/.npm"
       prompt `shouldSatisfy` T.isInfixOf "/home/.cache"
 
     it "omits PREVIOUSLY CLEANED section when paths are empty" $ do
-      let prompt = buildPromptWith "scan output" [] [] [] []
+      let prompt = buildPromptWith "scan output" [] [] [] [] []
       prompt `shouldSatisfy` (not . T.isInfixOf "PREVIOUSLY CLEANED")
+
+  describe "buildPromptWith observation pages" $ do
+    it "includes CROSS-CUTTING WIKI RULES when observation pages are non-empty" $ do
+      let obsPage = WikiPage "observations/skip-patterns-windows.md" "skip-patterns"
+                      "Skip Patterns" "Do NOT delete .blend files" "sha" Nothing 0 0
+          prompt = buildPromptWith "scan output" [] [] [] [] [obsPage]
+      prompt `shouldSatisfy` T.isInfixOf "CROSS-CUTTING WIKI RULES"
+      prompt `shouldSatisfy` T.isInfixOf "HARD CONSTRAINTS"
+      prompt `shouldSatisfy` T.isInfixOf "Do NOT delete .blend files"
+      prompt `shouldSatisfy` T.isInfixOf "observations/skip-patterns-windows.md"
+
+    it "omits CROSS-CUTTING WIKI RULES when observation pages are empty" $ do
+      let prompt = buildPromptWith "scan output" [] [] [] [] []
+      prompt `shouldSatisfy` (not . T.isInfixOf "CROSS-CUTTING WIKI RULES")
 
   describe "buildLearnPrompt" $ do
     it "includes session events" $ do

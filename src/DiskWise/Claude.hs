@@ -64,10 +64,10 @@ prefixCommitMsg msg
 
 -- | Call Claude to investigate disk usage with wiki context
 investigate :: AppConfig -> T.Text -> [(WikiPage, [Finding])] -> [Finding]
-           -> [CommandStats] -> [(FilePath, Integer)]
+           -> [CommandStats] -> [(FilePath, Integer)] -> [WikiPage]
            -> IO (Either DiskWiseError ClaudeAdvice)
-investigate config scanOutput matchedPages novelFindings cmdStats prevCleaned = do
-  let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned
+investigate config scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages = do
+  let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages
       sysPrompt = buildSystemPrompt
   result <- callClaude config sysPrompt userPrompt
   case result of
@@ -250,12 +250,19 @@ buildSystemPrompt = T.unlines
   , ""
   , "Guidelines:"
   , "- Propose cleanup_actions for anything that can safely free space"
+  , "- Wiki pages under CROSS-CUTTING WIKI RULES are HARD CONSTRAINTS."
+  , "  Do NOT propose cleanup_actions that would remove items explicitly excluded there."
+  , "- If a wiki page's \"What's NOT safe to delete\" section lists a path or pattern,"
+  , "  do NOT suggest deleting it regardless of how much space it would free."
   , "- cleanup_actions MUST ONLY contain commands that actually free disk space"
   , "  (rm, cache clean, prune, etc.). Do NOT include diagnostic commands"
   , "  (du, ls, df, find) as cleanup actions. Mention investigation suggestions"
   , "  in the analysis text instead."
   , "- If the scan already shows a large reclaimable area, propose a direct"
   , "  cleanup command rather than an investigative command."
+  , "- size_estimate MUST reflect the space freed by the exact command, not the"
+  , "  total size of a parent directory. If the command targets a subdirectory,"
+  , "  estimate only that subdirectory's size."
   , "- Set risk_level: low for caches/temp, medium for logs/old files, high for data"
   , "- Use CreatePage for new tools/topics, AmendPage to add info to existing pages"
   , "- Wiki pages should be generic (useful to anyone), not user-specific"
@@ -295,12 +302,13 @@ buildSystemPrompt = T.unlines
 
 -- | Build the user message with scan output + wiki context + novel findings
 buildPrompt :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> T.Text
-buildPrompt scanOutput matchedPages novelFindings = buildPromptWith scanOutput matchedPages novelFindings [] []
+buildPrompt scanOutput matchedPages novelFindings = buildPromptWith scanOutput matchedPages novelFindings [] [] []
 
--- | Build prompt with optional command reliability stats and previously cleaned paths
+-- | Build prompt with optional command reliability stats, previously cleaned paths,
+-- and cross-cutting observation pages
 buildPromptWith :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> [CommandStats]
-               -> [(FilePath, Integer)] -> T.Text
-buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned = T.unlines $
+               -> [(FilePath, Integer)] -> [WikiPage] -> T.Text
+buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned observationPages = T.unlines $
   [ "== SCAN OUTPUT =="
   , scanOutput
   , ""
@@ -325,8 +333,18 @@ buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned = T.u
         , "These paths were cleaned in a recent session. Avoid re-suggesting them"
         , "unless the scan shows they have significantly regrown."
         ] <> map formatPrevCleaned prevCleaned <> [""]
+  ) <>
+  (if null observationPages then []
+   else [ "== CROSS-CUTTING WIKI RULES =="
+        , "The following observation pages apply across all findings."
+        , "Treat any prohibitions as HARD CONSTRAINTS — do NOT propose cleanup for excluded items."
+        ] <> concatMap formatObservationPage observationPages <> [""]
   )
   where
+    formatObservationPage page =
+      [ "--- " <> T.pack (pageRelPath page) <> " ---"
+      , pageBody page
+      ]
     formatPrevCleaned (path, bytes) =
       "- " <> T.pack path <> " (freed " <> formatBytes bytes <> ")"
     formatMatchedPage (page, findings) =
