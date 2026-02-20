@@ -13,6 +13,7 @@ import Control.Exception (catch, SomeException)
 import Data.Aeson (encode, eitherDecode, object, (.=), (.:), withObject, FromJSON(..))
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
+import Data.IORef
 import qualified Data.Text as T
 import System.IO (hPutStrLn, stderr)
 
@@ -147,11 +148,14 @@ batchGarden config = do
     Right allPages -> do
       hPutStrLn stderr $ "Loaded " <> show (length allPages) <> " page(s)."
       identity <- agentIdentity
-      gardenLoop config allPages identity 0 []
+      cacheRef <- newIORef allPages
+      gardenLoop config cacheRef identity 0 []
 
 -- | Gardening loop: improve wiki until convergence (max 5 passes)
-gardenLoop :: AppConfig -> [WikiPage] -> T.Text -> Int -> [T.Text] -> IO ()
-gardenLoop config allPages identity passNum passSummaries = do
+-- Uses an IORef cache to avoid re-fetching the full wiki tree between passes.
+gardenLoop :: AppConfig -> IORef [WikiPage] -> T.Text -> Int -> [T.Text] -> IO ()
+gardenLoop config cacheRef identity passNum passSummaries = do
+  allPages <- readIORef cacheRef
   let maxPasses = 5 :: Int
   if passNum >= maxPasses
     then do
@@ -179,18 +183,10 @@ gardenLoop config allPages identity passNum passSummaries = do
                 pushGardenSessionLog config allPages identity
                   (passSummaries <> [refactorSummary refResult])
               else do
-                -- Push each gardening contribution
-                mapM_ (pushGardenContrib config allPages) (refactorContributions refResult)
-                -- Re-fetch full tree for next pass (includes freshly written _meta/)
-                freshResult <- fetchFullTree config
-                case freshResult of
-                  Left _ -> do
-                    hPutStrLn stderr "Failed to re-fetch wiki after push."
-                    pushGardenSessionLog config allPages identity
-                      (passSummaries <> [refactorSummary refResult])
-                  Right freshPages ->
-                    gardenLoop config freshPages identity (passNum + 1)
-                      (passSummaries <> [refactorSummary refResult])
+                -- Push each gardening contribution and update cache
+                mapM_ (pushAndCache config cacheRef) (refactorContributions refResult)
+                gardenLoop config cacheRef identity (passNum + 1)
+                  (passSummaries <> [refactorSummary refResult])
 
 -- | Partition pages into content pages and _meta/ pages
 partitionPages :: [WikiPage] -> ([WikiPage], [WikiPage])
@@ -201,13 +197,28 @@ partitionPages pages =
   where
     isMeta page = T.isPrefixOf "_meta/" (T.pack (pageRelPath page))
 
--- | Push a gardening contribution (auto-approved)
-pushGardenContrib :: AppConfig -> [WikiPage] -> WikiContribution -> IO ()
-pushGardenContrib config pages contrib = do
+-- | Push a gardening contribution and update the in-memory cache
+pushAndCache :: AppConfig -> IORef [WikiPage] -> WikiContribution -> IO ()
+pushAndCache config cacheRef contrib = do
+  pages <- readIORef cacheRef
   let prefixed = contrib { contribSummary = prefixGardenerMsg (contribSummary contrib) }
   result <- pushContribution config pages prefixed
   case result of
-    Right () -> hPutStrLn stderr $ "  Pushed: " <> contribPath prefixed
+    Right () -> do
+      hPutStrLn stderr $ "  Pushed: " <> contribPath prefixed
+      -- Update the cache: replace or add the page
+      let newPage = WikiPage
+            { pageRelPath      = contribPath prefixed
+            , pageTopic        = T.pack (contribPath prefixed)
+            , pageTitle        = T.pack (contribPath prefixed)
+            , pageBody         = contribContent prefixed
+            , pageSha          = ""  -- SHA unknown after push, but not needed for content
+            , pageLastVerified = Nothing
+            , pageVerifyCount  = 0
+            , pageFailCount    = 0
+            }
+          updated = newPage : filter (\p -> pageRelPath p /= contribPath prefixed) pages
+      writeIORef cacheRef updated
     Left err -> hPutStrLn stderr $ "  Failed: " <> contribPath prefixed
                                 <> " — " <> show err
 
