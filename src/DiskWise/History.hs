@@ -6,12 +6,14 @@ module DiskWise.History
   , loadSessionHistory
   , summarizeSession
   , formatSessionHistory
+  , computeSkipPatterns
   ) where
 
 import Control.Exception (catch, SomeException)
 import Data.Aeson (encode, eitherDecode)
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
+import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Data.Time (getCurrentTime)
 import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory)
@@ -84,13 +86,30 @@ formatSessionHistory summaries =
       avgFreed = if totalSessions > 0
                  then totalFreed `div` fromIntegral totalSessions
                  else 0
+      skipPatterns = computeSkipPatterns summaries
   in T.unlines $
     [ "== HISTORICAL PATTERNS (last " <> T.pack (show (length recent))
       <> " of " <> T.pack (show totalSessions) <> " sessions) =="
     ] <> map formatSummary recent <>
     [ ""
     , "Average space freed per session: ~" <> formatSize avgFreed
-    ]
+    ] <>
+    (if null skipPatterns then [] else
+      [ ""
+      , "== SKIP PATTERNS =="
+      , "The following actions are frequently skipped by users:"
+      ] <> map formatSkipPattern skipPatterns <>
+      [ ""
+      , "SKIP PATTERNS INDICATE MISCALIBRATED ADVICE. If an action is skipped more"
+      , "than half the time:"
+      , "- If the reason is \"too risky\": amend the wiki page to raise the documented"
+      , "  risk level, or add caveats to \"What's NOT safe to delete\"."
+      , "- If the reason is \"not applicable\": the matching may be wrong, or the page"
+      , "  needs better platform notes."
+      , "- If the reason is \"already handled\": this is fine, no wiki change needed."
+      , "- If the reason is \"not now\": this is fine, no wiki change needed."
+      ]
+    )
   where
     formatSummary s = T.unlines $
       [ "- Session on " <> platformOS (summaryPlatform s) <> "/" <> platformArch (summaryPlatform s)
@@ -110,8 +129,24 @@ formatSessionHistory summaries =
       | b >= 1024 * 1024        = T.pack (show (b `div` (1024 * 1024))) <> " MB"
       | otherwise               = T.pack (show (b `div` 1024)) <> " KB"
 
+    formatSkipPattern (desc, count, reasons) =
+      "- \"" <> desc <> "\" skipped " <> T.pack (show count) <> " time(s)"
+      <> "\n  Reasons: " <> T.intercalate ", " (map reasonText reasons)
+
     reasonText TooRisky            = "too risky"
     reasonText NotNow              = "not now"
     reasonText AlreadyHandled      = "already handled"
     reasonText NotApplicable       = "not applicable"
     reasonText (SkipReasonOther t) = t
+
+-- | Compute skip patterns across sessions.
+-- Returns: (action description, times skipped, skip reasons)
+computeSkipPatterns :: [SessionSummary] -> [(T.Text, Int, [SkipReason])]
+computeSkipPatterns summaries =
+  let skipMap = Map.fromListWith (++)
+        [ (desc, [reason])
+        | s <- summaries
+        , (desc, reason) <- summarySkipReasons s
+        ]
+  in [ (desc, length reasons, reasons)
+     | (desc, reasons) <- Map.toList skipMap ]

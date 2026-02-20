@@ -9,7 +9,7 @@ import System.IO (hPutStrLn, hClose, openTempFile)
 import Test.Hspec
 
 import DiskWise.Types
-import DiskWise.History (summarizeSession, formatSessionHistory)
+import DiskWise.History (summarizeSession, formatSessionHistory, computeSkipPatterns)
 
 testTime :: UTCTime
 testTime = UTCTime (fromGregorian 2025 1 15) 43200
@@ -65,3 +65,39 @@ spec = do
             }
           formatted = formatSessionHistory [summary]
       formatted `shouldSatisfy` (/= "")
+
+  describe "computeSkipPatterns" $ do
+    it "aggregates skip reasons across sessions" $ do
+      let summary1 = SessionSummary
+            { summaryTimestamp     = testTime
+            , summaryPlatform      = PlatformInfo "linux" "x86_64" "bash"
+            , summaryFindingCount  = 5
+            , summaryActionsRun    = 1
+            , summaryActionsFailed = 0
+            , summarySkipReasons   = [("Remove dist-newstyle", TooRisky)]
+            , summaryBytesFreed    = Nothing
+            , summaryUserFeedback  = Nothing
+            , summaryFailedCmds    = []
+            }
+          summary2 = summary1
+            { summarySkipReasons = [ ("Remove dist-newstyle", TooRisky)
+                                   , ("Clear journal", NotApplicable) ]
+            }
+          patterns = computeSkipPatterns [summary1, summary2]
+      length patterns `shouldBe` 2
+      -- dist-newstyle should be skipped 2 times
+      case filter (\(d, _, _) -> d == "Remove dist-newstyle") patterns of
+        [(_, count, reasons)] -> do
+          count `shouldBe` 2
+          length reasons `shouldBe` 2
+        _ -> expectationFailure "Expected one pattern for dist-newstyle"
+
+    it "returns empty for no skips" $ do
+      let summary = SessionSummary
+            { summaryTimestamp = testTime
+            , summaryPlatform = PlatformInfo "linux" "x86_64" "bash"
+            , summaryFindingCount = 0, summaryActionsRun = 0, summaryActionsFailed = 0
+            , summarySkipReasons = [], summaryBytesFreed = Nothing
+            , summaryUserFeedback = Nothing, summaryFailedCmds = []
+            }
+      computeSkipPatterns [summary] `shouldBe` []
