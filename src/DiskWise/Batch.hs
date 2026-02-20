@@ -18,7 +18,7 @@ import qualified Data.Text as T
 import System.IO (hPutStrLn, stderr)
 
 import DiskWise.Types
-import DiskWise.Wiki
+import DiskWise.WikiRouter
 import DiskWise.Claude
 import DiskWise.Scanner
 

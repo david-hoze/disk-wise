@@ -6,9 +6,9 @@ import qualified Data.Text as T
 import Test.Hspec
 
 import DiskWise.Types
-import DiskWise.Wiki (matchPages, matchPagesHeuristic, parsePagePatterns, parsePageToolNames,
-                      parseMetaComment, renderMetaComment, PageMeta(..),
-                      deduplicateContribs)
+import DiskWise.WikiRouter (matchPages, matchPagesHeuristic, parsePagePatterns, parsePageToolNames,
+                            parseMetaComment, renderMetaComment, PageMeta(..),
+                            deduplicateContribs)
 
 -- | Helper to make a wiki page for testing
 mkPage :: FilePath -> T.Text -> T.Text -> T.Text -> WikiPage

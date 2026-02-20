@@ -111,6 +111,7 @@ data AppConfig = AppConfig
   , configScanPaths  :: [FilePath]
   , configMinSizeMB  :: Integer
   , configModel      :: Text
+  , configGistId     :: Text        -- ^ GitHub Gist ID for gist backend (empty = use repo)
   } deriving (Show, Eq, Generic)
 
 instance ToJSON AppConfig

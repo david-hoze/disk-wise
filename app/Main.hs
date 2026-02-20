@@ -23,6 +23,7 @@ data CommonOpts = CommonOpts
   , optMinSizeMB  :: Integer
   , optModel      :: String
   , optApiKey     :: Maybe String
+  , optGistId     :: Maybe String
   } deriving (Show)
 
 commonOptsParser :: Parser CommonOpts
@@ -50,6 +51,11 @@ commonOptsParser = CommonOpts
         ( long "api-key"
        <> metavar "KEY"
        <> help "Anthropic API key (overrides ANTHROPIC_API_KEY env var)"
+        ))
+  <*> optional (strOption
+        ( long "gist-id"
+       <> metavar "GIST_ID"
+       <> help "GitHub Gist ID for wiki storage (overrides DISKWISE_GIST_ID env var)"
         ))
 
 commandParser :: Parser Command
@@ -125,6 +131,11 @@ buildConfig opts = do
   wikiTokenEnv <- lookupEnv "DISKWISE_WIKI_TOKEN"
   let token = maybe wikiToken T.pack wikiTokenEnv
 
+  gistIdMaybe <- case optGistId opts of
+    Just gid -> pure (Just gid)
+    Nothing  -> lookupEnv "DISKWISE_GIST_ID"
+  let gistId = maybe "" T.pack gistIdMaybe
+
   home <- maybe "$HOME" id <$> lookupEnv "HOME"
   let scanPaths = case optScanPaths opts of
         [] -> [home]
@@ -138,4 +149,5 @@ buildConfig opts = do
     , configScanPaths  = scanPaths
     , configMinSizeMB  = optMinSizeMB opts
     , configModel      = T.pack (optModel opts)
+    , configGistId     = gistId
     }

@@ -116,6 +116,7 @@ spec = do
         , configScanPaths  = ["/home/user", "/var"]
         , configMinSizeMB  = 50
         , configModel      = "claude-sonnet-4-20250514"
+        , configGistId     = ""
         }
 
   describe "RefactorResult JSON round-trip" $

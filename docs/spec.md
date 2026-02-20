@@ -293,6 +293,20 @@ The wiki lives in a public GitHub repository. The agent accesses it via the GitH
 
 The gardener uses a distinct prefix: `diskwise-gardener: merge overlapping docker pages` `diskwise-gardener: update gardening log` `diskwise-gardener: note structural observations`
 
+### Gist Backend
+
+As an alternative to a full GitHub repository, DiskWise supports storing wiki pages in a GitHub Gist. This is useful for small wikis or users who want a simpler setup without a dedicated repo.
+
+**Configuration**: Set the `DISKWISE_GIST_ID` environment variable or pass `--gist-id GIST_ID` on the command line. When a gist ID is configured, all wiki operations route through the Gist API instead of the GitHub Contents API. The same `DISKWISE_WIKI_TOKEN` PAT is used for authentication (it needs the `gist` scope).
+
+**Path encoding**: Gists are flat (no directories). Wiki paths are encoded by replacing `/` with `--`. For example, `tools/npm.md` becomes `tools--npm.md` in the gist, and `_meta/gardening-log.md` becomes `_meta--gardening-log.md`.
+
+**API mapping**: Reading uses `GET /gists/{id}` which returns all file contents inline. Writing uses `PATCH /gists/{id}` with a `files` object. Gists have no SHA-based concurrency control — last write wins — so the retry-with-backoff logic used by the repo backend is not needed.
+
+**Routing**: The `DiskWise.WikiRouter` module checks `configGistId` and delegates to either `DiskWise.Wiki` (repo backend) or `DiskWise.WikiGist` (gist backend). Pure functions like `matchPages`, `deduplicateContribs`, and `parseMetaComment` are shared between both backends.
+
+---
+
 ## Claude Access
 
 The agent supports two ways to use Claude:

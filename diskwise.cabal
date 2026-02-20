@@ -20,6 +20,8 @@ library diskwise-lib
   exposed-modules:
       DiskWise.Types
     , DiskWise.Wiki
+    , DiskWise.WikiGist
+    , DiskWise.WikiRouter
     , DiskWise.Claude
     , DiskWise.Scanner
     , DiskWise.CLI
@@ -50,6 +52,7 @@ test-suite diskwise-tests
   other-modules:
       DiskWise.TypesSpec
     , DiskWise.WikiSpec
+    , DiskWise.WikiGistSpec
     , DiskWise.ScannerSpec
     , DiskWise.ClaudeSpec
   build-depends:

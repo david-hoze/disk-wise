@@ -16,7 +16,7 @@ import System.Directory (createDirectoryIfMissing, getHomeDirectory,
 import System.IO (hFlush, stdout, hSetBuffering, stdin, BufferMode(..))
 
 import DiskWise.Types
-import DiskWise.Wiki
+import DiskWise.WikiRouter
 import DiskWise.Claude (investigate, callClaude, buildSystemPrompt, buildLearnPrompt,
                         parseAdvice, agentIdentity, prefixCommitMsg)
 import DiskWise.Scanner
