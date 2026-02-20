@@ -74,8 +74,8 @@ batchAnalyze config scanFile = do
 -- | Execute a single cleanup action from JSON argument
 -- Input:  JSON string of a CleanupAction
 -- Output: { "success": true/false, "message": "..." }
-batchCleanup :: String -> IO ()
-batchCleanup actionJson = do
+batchCleanup :: AppConfig -> String -> IO ()
+batchCleanup config actionJson = do
   case eitherDecode (BLC.pack actionJson) of
     Left err -> do
       hPutStrLn stderr $ "Failed to parse action: " <> err
@@ -84,6 +84,13 @@ batchCleanup actionJson = do
     Right action -> do
       hPutStrLn stderr $ "Running: " <> T.unpack (actionDescription action)
       result <- runCleanupAction action
+      let success = case result of { Right _ -> True; Left _ -> False }
+      -- Record outcome against wiki page metadata (best-effort)
+      case actionWikiRef action of
+        Just wref -> do
+          wikiPages <- fetchWikiGracefully' config
+          recordOutcome config wikiPages (T.unpack wref) success
+        Nothing -> pure ()
       case result of
         Right msg -> BLC.putStrLn $ encode $ object
           [ "success" .= True, "message" .= msg ]

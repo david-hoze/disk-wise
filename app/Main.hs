@@ -14,7 +14,7 @@ data Command
   = Interactive CommonOpts
   | BatchScan CommonOpts
   | BatchAnalyze CommonOpts FilePath
-  | BatchCleanup String
+  | BatchCleanup CommonOpts String
   | BatchContribute CommonOpts String
   | Garden CommonOpts
 
@@ -61,8 +61,8 @@ commandParser = subparser
   <> command "analyze" (info (BatchAnalyze <$> commonOptsParser
       <*> strArgument (metavar "SCAN_FILE" <> help "Path to scan output JSON file"))
       (progDesc "Analyze scan output with wiki + Claude, output JSON advice"))
-  <> command "cleanup" (info (BatchCleanup
-      <$> strArgument (metavar "ACTION_JSON" <> help "CleanupAction as JSON string"))
+  <> command "cleanup" (info (BatchCleanup <$> commonOptsParser
+      <*> strArgument (metavar "ACTION_JSON" <> help "CleanupAction as JSON string"))
       (progDesc "Execute a single cleanup action from JSON"))
   <> command "contribute" (info (BatchContribute <$> commonOptsParser
       <*> strArgument (metavar "CONTRIB_JSON" <> help "WikiContribution as JSON string"))
@@ -103,8 +103,9 @@ main = do
       config <- buildConfig opts
       batchAnalyze config scanFile
 
-    BatchCleanup actionJson ->
-      batchCleanup actionJson
+    BatchCleanup opts actionJson -> do
+      config <- buildConfig opts
+      batchCleanup config actionJson
 
     BatchContribute opts contribJson -> do
       config <- buildConfig opts

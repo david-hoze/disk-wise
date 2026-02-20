@@ -98,7 +98,7 @@ runInvestigate config = do
       presentAdvice advice
 
       -- Step 7: Offer cleanup actions (tracking results in session)
-      offerCleanup sessionRef (adviceCleanupActions advice)
+      offerCleanup config sessionRef wikiPages (adviceCleanupActions advice)
 
       -- Step 8: Session-aware learning — ask Claude to review the whole session
       TIO.putStrLn "-- Learning from session --\n"
@@ -136,14 +136,14 @@ presentAdvice advice = do
   TIO.putStrLn ""
 
 -- | Offer cleanup actions one by one, tracking results in the session log
-offerCleanup :: IORef SessionLog -> [CleanupAction] -> IO ()
-offerCleanup _ [] = TIO.putStrLn "No cleanup actions suggested.\n"
-offerCleanup sessionRef actions = do
+offerCleanup :: AppConfig -> IORef SessionLog -> [WikiPage] -> [CleanupAction] -> IO ()
+offerCleanup _ _ _ [] = TIO.putStrLn "No cleanup actions suggested.\n"
+offerCleanup config sessionRef pages actions = do
   TIO.putStrLn $ "-- " <> T.pack (show (length actions)) <> " cleanup action(s) suggested --\n"
-  mapM_ (offerOne sessionRef) actions
+  mapM_ (offerOne config sessionRef pages) actions
   TIO.putStrLn ""
   where
-    offerOne ref action = do
+    offerOne cfg ref pgs action = do
       TIO.putStrLn $ "  Action:   " <> actionDescription action
       TIO.putStrLn $ "  Command:  " <> actionCommand action
       TIO.putStrLn $ "  Risk:     " <> actionRiskLevel action
@@ -164,9 +164,15 @@ offerCleanup sessionRef actions = do
             Right msg -> do
               TIO.putStrLn $ "  OK: " <> msg
               modifyIORef ref (`addEvent` ActionExecuted action msg)
+              case actionWikiRef action of
+                Just wref -> recordOutcome cfg pgs (T.unpack wref) True
+                Nothing   -> pure ()
             Left err -> do
               TIO.putStrLn $ "  Error: " <> err
               modifyIORef ref (`addEvent` ActionFailed action err)
+              case actionWikiRef action of
+                Just wref -> recordOutcome cfg pgs (T.unpack wref) False
+                Nothing   -> pure ()
         _ -> do
           TIO.putStrLn "  Skipped."
           modifyIORef ref (`addEvent` ActionSkipped action)

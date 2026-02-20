@@ -15,6 +15,7 @@ module DiskWise.Wiki
   , updatePageMeta
   , parseMetaComment
   , renderMetaComment
+  , recordOutcome
   , PageMeta(..)
   , defaultPageMeta
   ) where
@@ -254,6 +255,31 @@ updatePageMeta success = do
               , pageLastVerified = Just now
               }
     else page { pageFailCount = pageFailCount page + 1 }
+
+-- | Record a cleanup outcome against a wiki page's metadata.
+-- Best-effort: failures are silently ignored.
+recordOutcome :: AppConfig -> [WikiPage] -> FilePath -> Bool -> IO ()
+recordOutcome config pages wikiRef success = do
+  case filter (\p -> pageRelPath p == wikiRef) pages of
+    (page:_) -> do
+      updater <- updatePageMeta success
+      let updated = updater page
+          meta = PageMeta
+            { metaLastVerified = pageLastVerified updated
+            , metaVerifyCount  = pageVerifyCount updated
+            , metaFailCount    = pageFailCount updated
+            }
+          newContent = renderMetaComment meta <> pageBody updated
+          contrib = WikiContribution
+            { contribType    = AmendPage
+            , contribPath    = pageRelPath page
+            , contribContent = newContent
+            , contribSummary = "diskwise-agent: update outcome metadata"
+            }
+      _ <- pushContribution config pages contrib
+      pure ()
+    [] -> pure ()
+  `catch` (\(_ :: SomeException) -> pure ())
 
 -- | Replace home directory paths with ~ and strip usernames (pure version)
 -- Takes the home directory as a parameter for testability
