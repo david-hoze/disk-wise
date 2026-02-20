@@ -114,7 +114,9 @@ runInvestigate config = do
 
       -- Step 9: Offer wiki contributions
       _ <- offerLearn config sessionRef wikiPages allContribs
-      pure ()
+
+      -- Step 10: Post-cleanup feedback check
+      postCleanupFeedback sessionRef
 
 -- | Fetch wiki pages, returning empty list on any failure
 fetchWikiGracefully :: AppConfig -> IO [WikiPage]
@@ -325,6 +327,27 @@ savePending contrib = do
   TIO.writeFile filename (contribContent contrib)
   where
     sanitizeFilename = map (\c -> if c == '/' then '_' else c)
+
+-- | Ask for post-cleanup feedback if any actions were executed
+postCleanupFeedback :: IORef SessionLog -> IO ()
+postCleanupFeedback sessionRef = do
+  session <- readIORef sessionRef
+  let hasExecuted = any isExecuted (logEvents session)
+  when hasExecuted $ do
+    TIO.putStrLn "\n-- Post-cleanup check --\n"
+    TIO.putStr "Did anything break or behave unexpectedly after cleanup?\n[n] Everything's fine  [y] Something went wrong\n> "
+    hFlush stdout
+    answer <- getLine
+    case answer of
+      "y" -> do
+        TIO.putStr "Briefly describe what happened: "
+        hFlush stdout
+        feedback <- getLine
+        modifyIORef sessionRef (`addEvent` UserFeedback (T.pack feedback))
+      _ -> pure ()
+  where
+    isExecuted (ActionExecuted _) = True
+    isExecuted _                  = False
 
 -- | Ask the user why they skipped a cleanup action
 askSkipReason :: IO SkipReason

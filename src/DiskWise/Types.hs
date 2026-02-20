@@ -180,6 +180,7 @@ data SessionEvent
   | ActionSkipped CleanupAction SkipReason -- ^ user declined + reason
   | ContribPushed WikiContribution ContribDecision -- ^ pushed + how user decided
   | ContribFailed WikiContribution Text -- ^ failed to push + error
+  | UserFeedback Text                  -- ^ freeform feedback at end of session
   deriving (Show, Eq)
 
 -- | Log of everything that happened in a session

@@ -354,6 +354,12 @@ buildLearnPrompt sessionLog identity =
   , "When documenting failures or platform-specific behavior, include the platform"
   , "in the wiki page's ## Platform notes section. Use the format:"
   , "\"On [OS] ([arch]): [observation]\""
+  , ""
+  , "USER FEEDBACK IS THE HIGHEST-VALUE SIGNAL. If the user reported a problem:"
+  , "1. Identify which cleanup action likely caused it."
+  , "2. Amend the relevant wiki page's \"What's NOT safe to delete\" section."
+  , "3. If the action came from a wiki recommendation, add a warning."
+  , "This is more important than any other wiki contribution this session."
   ]
   where
     formatEvent (ActionExecuted outcome) =
@@ -377,6 +383,8 @@ buildLearnPrompt sessionLog identity =
           "WIKI SKIPPED: " <> T.pack (contribPath contrib)
     formatEvent (ContribFailed contrib err) =
       "WIKI FAILED: " <> T.pack (contribPath contrib) <> " — " <> err
+    formatEvent (UserFeedback feedback) =
+      "USER FEEDBACK: \"" <> feedback <> "\""
 
 -- | Format a byte count as a human-readable string
 formatBytes :: Integer -> T.Text
