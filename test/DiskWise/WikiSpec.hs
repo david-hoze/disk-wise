@@ -6,7 +6,7 @@ import qualified Data.Text as T
 import Test.Hspec
 
 import DiskWise.Types
-import DiskWise.Wiki (matchPages, parsePagePatterns, parsePageToolNames,
+import DiskWise.Wiki (matchPages, matchPagesHeuristic, parsePagePatterns, parsePageToolNames,
                       parseMetaComment, renderMetaComment, PageMeta(..))
 
 -- | Helper to make a wiki page for testing
@@ -67,7 +67,7 @@ spec = do
       names `shouldSatisfy` elem "dangling images"
       names `shouldSatisfy` elem "build cache"
 
-  describe "matchPages" $ do
+  describe "matchPagesHeuristic" $ do
     it "matches pages to findings by path pattern" $ do
       let page = mkPage "tools/npm.md" "npm" "npm"
                    "# npm\n\n- `~/.npm`\n"

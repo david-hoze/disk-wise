@@ -76,9 +76,9 @@ runInvestigate config = do
   TIO.putStrLn "-- Fetching wiki knowledge --\n"
   wikiPages <- fetchWikiGracefully config
 
-  -- Step 4: Match pages to findings
-  let matched = matchPages wikiPages findings
-      matchedFindingPaths = concatMap (map findingPath . snd) matched
+  -- Step 4: Match pages to findings (Claude-assisted, with heuristic fallback)
+  matched <- matchPagesWithClaude (callClaude config) wikiPages findings
+  let matchedFindingPaths = concatMap (map findingPath . snd) matched
       novelFindings = filter (\f -> findingPath f `notElem` matchedFindingPaths) findings
 
   TIO.putStrLn $ "Wiki matched " <> T.pack (show (length matched))

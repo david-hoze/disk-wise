@@ -53,9 +53,9 @@ batchAnalyze config scanFile = do
       hPutStrLn stderr "Fetching wiki..."
       wikiPages <- fetchWikiGracefully' config
 
-      -- Match
-      let matched = matchPages wikiPages findings
-          matchedPaths = concatMap (map findingPath . snd) matched
+      -- Match (Claude-assisted, with heuristic fallback)
+      matched <- matchPagesWithClaude (callClaude config) wikiPages findings
+      let matchedPaths = concatMap (map findingPath . snd) matched
           novel = filter (\f -> findingPath f `notElem` matchedPaths) findings
 
       hPutStrLn stderr $ "Wiki matched " <> show (length matched) <> " page(s)."

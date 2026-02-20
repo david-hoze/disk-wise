@@ -6,6 +6,8 @@ module DiskWise.Wiki
   , fetchFullTree
   , fetchPage
   , matchPages
+  , matchPagesHeuristic
+  , matchPagesWithClaude
   , createPage
   , updatePage
   , pushContribution
@@ -23,6 +25,7 @@ module DiskWise.Wiki
 import Control.Concurrent (threadDelay)
 import Control.Exception (catch, SomeException)
 import Data.Aeson
+import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Lazy as BL
@@ -136,15 +139,83 @@ extractTitle body =
     (h:_) -> T.strip (T.drop 2 h)
     []     -> "Untitled"
 
--- | Match wiki pages to findings by path patterns and tool names
+-- | Match wiki pages to findings (heuristic, used as fallback)
 matchPages :: [WikiPage] -> [Finding] -> [(WikiPage, [Finding])]
-matchPages pages findings =
+matchPages = matchPagesHeuristic
+
+-- | Match wiki pages to findings by path patterns and tool names
+matchPagesHeuristic :: [WikiPage] -> [Finding] -> [(WikiPage, [Finding])]
+matchPagesHeuristic pages findings =
   [ (page, matched)
   | page <- pages
   , let patterns = parsePagePatterns (pageBody page)
         toolNames = parsePageToolNames page
         matched = filter (matchesFinding patterns toolNames) findings
   , not (null matched)
+  ]
+
+-- | Match wiki pages to findings using a Claude call for smarter matching.
+-- Falls back to heuristic matching if the Claude call fails.
+-- Takes a @callFn@ to avoid circular dependency with Claude module.
+matchPagesWithClaude :: (T.Text -> T.Text -> IO (Either DiskWiseError T.Text))
+                     -> [WikiPage] -> [Finding]
+                     -> IO [(WikiPage, [Finding])]
+matchPagesWithClaude callFn pages findings = do
+  let prompt = buildMatchPromptInternal pages findings
+      sysPrompt = "You match wiki pages to filesystem findings. Respond with ONLY valid JSON."
+  result <- callFn sysPrompt prompt
+  case result of
+    Left _ -> pure (matchPagesHeuristic pages findings)
+    Right text ->
+      let parsed = parseMatchResultInternal text
+      in if null parsed
+         then pure (matchPagesHeuristic pages findings)
+         else pure (buildMatchResult pages findings parsed)
+
+-- | Build a lightweight prompt for matching pages to findings
+buildMatchPromptInternal :: [WikiPage] -> [Finding] -> T.Text
+buildMatchPromptInternal pages findings = T.unlines
+  [ "Match these wiki pages to filesystem findings."
+  , "Return JSON: {\"matches\": {\"page_path\": [finding_indices]}}"
+  , "Only include pages that are clearly relevant to at least one finding."
+  , ""
+  , "Pages:"
+  , T.unlines [ T.pack (show i) <> ". " <> T.pack (pageRelPath p)
+                <> " — " <> pageTitle p
+              | (i, p) <- zip [(0::Int)..] pages ]
+  , "Findings:"
+  , T.unlines [ T.pack (show i) <> ". " <> findingSummary f
+                <> " [" <> findingCategory f <> "]"
+              | (i, f) <- zip [(0::Int)..] findings ]
+  ]
+
+-- | Parse Claude's match response into a list of (page_path, [finding_index])
+parseMatchResultInternal :: T.Text -> [(FilePath, [Int])]
+parseMatchResultInternal text =
+  let jsonText = T.dropWhile (/= '{') text
+      jsonTrimmed = T.dropWhileEnd (/= '}') jsonText
+  in case eitherDecode (BL.fromStrict (TE.encodeUtf8 jsonTrimmed)) of
+    Right (Object obj) -> case KM.lookup "matches" obj of
+      Just (Object matches) ->
+        [ (T.unpack (Key.toText k), extractIndices v)
+        | (k, v) <- KM.toList matches
+        ]
+      _ -> []
+    _ -> []
+  where
+    extractIndices (Array arr) =
+      [ round n | Number n <- V.toList arr ]
+    extractIndices _ = []
+
+-- | Build the final match result from parsed Claude response
+buildMatchResult :: [WikiPage] -> [Finding] -> [(FilePath, [Int])] -> [(WikiPage, [Finding])]
+buildMatchResult pages findings parsed =
+  [ (page, matchedFindings)
+  | (pagePath, findingIdxs) <- parsed
+  , page <- pages
+  , pageRelPath page == pagePath
+  , let matchedFindings = [ findings !! i | i <- findingIdxs, i >= 0, i < length findings ]
+  , not (null matchedFindings)
   ]
 
 -- | Check if a finding matches any pattern or tool name from a wiki page
