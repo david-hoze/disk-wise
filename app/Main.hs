@@ -16,6 +16,7 @@ data Command
   | BatchAnalyze CommonOpts FilePath
   | BatchCleanup String
   | BatchContribute CommonOpts String
+  | Garden CommonOpts
 
 data CommonOpts = CommonOpts
   { optScanPaths  :: [FilePath]
@@ -66,6 +67,8 @@ commandParser = subparser
   <> command "contribute" (info (BatchContribute <$> commonOptsParser
       <*> strArgument (metavar "CONTRIB_JSON" <> help "WikiContribution as JSON string"))
       (progDesc "Push a single wiki contribution from JSON"))
+  <> command "garden" (info (Garden <$> commonOptsParser)
+      (progDesc "Improve wiki quality using the gardener (Opus 4.6)"))
   )
   <|> (Interactive <$> commonOptsParser)  -- default to interactive
 
@@ -106,6 +109,10 @@ main = do
     BatchContribute opts contribJson -> do
       config <- buildConfig opts
       batchContribute config contribJson
+
+    Garden opts -> do
+      config <- buildConfig opts
+      batchGarden config
 
 buildConfig :: CommonOpts -> IO AppConfig
 buildConfig opts = do

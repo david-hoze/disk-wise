@@ -6,6 +6,7 @@ module DiskWise.Batch
   , batchAnalyze
   , batchCleanup
   , batchContribute
+  , batchGarden
   ) where
 
 import Control.Exception (catch, SomeException)
@@ -13,7 +14,6 @@ import Data.Aeson (encode, eitherDecode, object, (.=), (.:), withObject, FromJSO
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
 import qualified Data.Text as T
-
 import System.IO (hPutStrLn, stderr)
 
 import DiskWise.Types
@@ -122,6 +122,109 @@ instance FromJSON ScanData where
   parseJSON = withObject "ScanData" $ \o ->
     ScanData <$> o .: "scan_output"
              <*> o .: "findings"
+
+-- | Run the gardener: improve wiki quality using Opus 4.6
+batchGarden :: AppConfig -> IO ()
+batchGarden config = do
+  hPutStrLn stderr "Fetching full wiki tree (including _meta/)..."
+  treeResult <- fetchFullTree config
+  case treeResult of
+    Left err -> do
+      hPutStrLn stderr $ "Failed to fetch wiki: " <> show err
+      pure ()
+    Right allPages -> do
+      hPutStrLn stderr $ "Loaded " <> show (length allPages) <> " page(s)."
+      identity <- agentIdentity
+      gardenLoop config allPages identity 0 []
+
+-- | Gardening loop: improve wiki until convergence (max 5 passes)
+gardenLoop :: AppConfig -> [WikiPage] -> T.Text -> Int -> [T.Text] -> IO ()
+gardenLoop config allPages identity passNum passSummaries = do
+  let maxPasses = 5 :: Int
+  if passNum >= maxPasses
+    then do
+      hPutStrLn stderr "Max gardening passes reached."
+      pushGardenSessionLog config allPages identity passSummaries
+    else do
+      let (contentPages, metaPages) = partitionPages allPages
+      hPutStrLn stderr $ "Gardening pass " <> show (passNum + 1) <> "..."
+      let userPrompt = buildGardenPrompt contentPages metaPages identity
+          sysPrompt = buildGardenSystemPrompt
+      result <- callClaudeGarden config sysPrompt userPrompt
+      case result of
+        Left err -> do
+          hPutStrLn stderr $ "Gardening error: " <> show err
+          pushGardenSessionLog config allPages identity passSummaries
+        Right text -> case parseRefactorResult text of
+          Left err -> do
+            hPutStrLn stderr $ "Parse error: " <> show err
+            pushGardenSessionLog config allPages identity passSummaries
+          Right refResult -> do
+            hPutStrLn stderr $ "  " <> T.unpack (refactorSummary refResult)
+            if refactorDone refResult || null (refactorContributions refResult)
+              then do
+                hPutStrLn stderr "Wiki converged — no more improvements needed."
+                pushGardenSessionLog config allPages identity
+                  (passSummaries <> [refactorSummary refResult])
+              else do
+                -- Push each gardening contribution
+                mapM_ (pushGardenContrib config allPages) (refactorContributions refResult)
+                -- Re-fetch full tree for next pass (includes freshly written _meta/)
+                freshResult <- fetchFullTree config
+                case freshResult of
+                  Left _ -> do
+                    hPutStrLn stderr "Failed to re-fetch wiki after push."
+                    pushGardenSessionLog config allPages identity
+                      (passSummaries <> [refactorSummary refResult])
+                  Right freshPages ->
+                    gardenLoop config freshPages identity (passNum + 1)
+                      (passSummaries <> [refactorSummary refResult])
+
+-- | Partition pages into content pages and _meta/ pages
+partitionPages :: [WikiPage] -> ([WikiPage], [WikiPage])
+partitionPages pages =
+  ( filter (not . isMeta) pages
+  , filter isMeta pages
+  )
+  where
+    isMeta page = T.isPrefixOf "_meta/" (T.pack (pageRelPath page))
+
+-- | Push a gardening contribution (auto-approved)
+pushGardenContrib :: AppConfig -> [WikiPage] -> WikiContribution -> IO ()
+pushGardenContrib config pages contrib = do
+  let prefixed = contrib { contribSummary = prefixGardenerMsg (contribSummary contrib) }
+  result <- pushContribution config pages prefixed
+  case result of
+    Right () -> hPutStrLn stderr $ "  Pushed: " <> contribPath prefixed
+    Left err -> hPutStrLn stderr $ "  Failed: " <> contribPath prefixed
+                                <> " — " <> show err
+
+-- | Push a final session log to _meta/gardening-log.md
+pushGardenSessionLog :: AppConfig -> [WikiPage] -> T.Text -> [T.Text] -> IO ()
+pushGardenSessionLog config pages identity summaries = do
+  let logEntry = T.unlines $
+        [ "- 2026-02-20: Gardening session (" <> identity <> ")" ] <>
+        map (\s -> "  - " <> s) summaries
+      existingMeta = filter (\p -> pageRelPath p == "_meta/gardening-log.md") pages
+      (cType, content) = case existingMeta of
+        (existing:_) -> (AmendPage, pageBody existing <> "\n" <> logEntry)
+        []           -> (CreatePage, T.unlines
+          [ "# Gardening Log"
+          , ""
+          , "Session history for the DiskWise wiki gardener."
+          , ""
+          , logEntry
+          ])
+      contrib = WikiContribution
+        { contribType    = cType
+        , contribPath    = "_meta/gardening-log.md"
+        , contribContent = content
+        , contribSummary = prefixGardenerMsg "update gardening session log"
+        }
+  result <- pushContribution config pages contrib
+  case result of
+    Right () -> hPutStrLn stderr "Gardening session log updated."
+    Left err -> hPutStrLn stderr $ "Failed to update session log: " <> show err
 
 -- | Fetch wiki pages silently, returning empty on failure
 fetchWikiGracefully' :: AppConfig -> IO [WikiPage]

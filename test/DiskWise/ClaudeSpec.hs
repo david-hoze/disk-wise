@@ -7,8 +7,9 @@ import Test.Hspec
 
 import DiskWise.Types
 import DiskWise.Claude (buildPrompt, buildSystemPrompt, buildLearnPrompt,
-                        buildRefactorPrompt, parseAdvice, parseRefactorResult,
-                        prefixCommitMsg)
+                        buildGardenSystemPrompt, buildGardenPrompt,
+                        parseAdvice, parseRefactorResult,
+                        prefixCommitMsg, prefixGardenerMsg)
 
 spec :: Spec
 spec = do
@@ -70,16 +71,41 @@ spec = do
       let prompt = buildLearnPrompt emptySessionLog "agent@myhost"
       prompt `shouldSatisfy` T.isInfixOf "agent@myhost"
 
-  describe "buildRefactorPrompt" $ do
-    it "includes touched paths" $ do
-      let prompt = buildRefactorPrompt [] ["tools/npm.md", "tools/yarn.md"] "agent@x"
-      prompt `shouldSatisfy` T.isInfixOf "tools/npm.md"
-      prompt `shouldSatisfy` T.isInfixOf "tools/yarn.md"
+  describe "buildGardenSystemPrompt" $ do
+    it "mentions _meta/ notes" $ do
+      let prompt = buildGardenSystemPrompt
+      prompt `shouldSatisfy` T.isInfixOf "_meta/"
+      prompt `shouldSatisfy` T.isInfixOf "notes to your future self"
 
-    it "includes all wiki pages" $ do
-      let page = WikiPage "tools/npm.md" "npm" "npm" "# npm content" "sha"
-          prompt = buildRefactorPrompt [page] [] "agent@x"
+    it "warns not to refactor _meta/ pages" $ do
+      buildGardenSystemPrompt `shouldSatisfy` T.isInfixOf "Do NOT reorganize"
+
+  describe "buildGardenPrompt" $ do
+    it "separates content and meta sections" $ do
+      let contentPage = WikiPage "tools/npm.md" "npm" "npm" "# npm content" "sha"
+          metaPage = WikiPage "_meta/notes.md" "notes" "notes" "# gardener notes" "sha2"
+          prompt = buildGardenPrompt [contentPage] [metaPage] "agent@x"
+      prompt `shouldSatisfy` T.isInfixOf "WIKI CONTENT PAGES"
       prompt `shouldSatisfy` T.isInfixOf "# npm content"
+      prompt `shouldSatisfy` T.isInfixOf "META PAGES"
+      prompt `shouldSatisfy` T.isInfixOf "# gardener notes"
+
+    it "shows first session message when no meta pages" $ do
+      let contentPage = WikiPage "tools/npm.md" "npm" "npm" "# npm" "sha"
+          prompt = buildGardenPrompt [contentPage] [] "agent@x"
+      prompt `shouldSatisfy` T.isInfixOf "first session"
+
+    it "includes agent identity" $ do
+      let prompt = buildGardenPrompt [] [] "agent@myhost"
+      prompt `shouldSatisfy` T.isInfixOf "agent@myhost"
+
+  describe "prefixGardenerMsg" $ do
+    it "adds gardener prefix" $
+      prefixGardenerMsg "improve npm page" `shouldBe` "diskwise-gardener: improve npm page"
+
+    it "does not double-prefix" $
+      prefixGardenerMsg "diskwise-gardener: improve npm page"
+        `shouldBe` "diskwise-gardener: improve npm page"
 
   describe "prefixCommitMsg" $ do
     it "adds prefix to plain messages" $

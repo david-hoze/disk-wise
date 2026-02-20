@@ -16,7 +16,8 @@ import System.IO (hFlush, stdout, hSetBuffering, stdin, BufferMode(..))
 
 import DiskWise.Types
 import DiskWise.Wiki
-import DiskWise.Claude
+import DiskWise.Claude (investigate, callClaude, buildSystemPrompt, buildLearnPrompt,
+                        parseAdvice, agentIdentity, prefixCommitMsg)
 import DiskWise.Scanner
 
 -- | Main application entry point
@@ -109,12 +110,8 @@ runInvestigate config = do
             Left _ -> adviceContributions advice
 
       -- Step 9: Offer wiki contributions
-      touchedPaths <- offerLearn config sessionRef wikiPages allContribs
-
-      -- Step 10: Refactoring loop
-      unless (null touchedPaths) $ do
-        TIO.putStrLn "-- Refactoring wiki --\n"
-        refactorLoop config wikiPages touchedPaths identity 0
+      _ <- offerLearn config sessionRef wikiPages allContribs
+      pure ()
 
 -- | Fetch wiki pages, returning empty list on any failure
 fetchWikiGracefully :: AppConfig -> IO [WikiPage]
@@ -180,9 +177,10 @@ offerLearn _ _ _ [] = do
   TIO.putStrLn "No wiki contributions suggested.\n"
   pure []
 offerLearn config sessionRef pages contribs = do
-  TIO.putStrLn $ "-- " <> T.pack (show (length contribs))
+  let filtered = filter (\c -> not (T.isPrefixOf "_meta/" (T.pack (contribPath c)))) contribs
+  TIO.putStrLn $ "-- " <> T.pack (show (length filtered))
               <> " wiki contribution(s) suggested --\n"
-  pushed <- mapM (offerOne config sessionRef pages) contribs
+  pushed <- mapM (offerOne config sessionRef pages) filtered
   TIO.putStrLn ""
   pure [p | Just p <- pushed]
   where
@@ -217,40 +215,6 @@ offerLearn config sessionRef pages contribs = do
         _ -> do
           TIO.putStrLn "  Skipped."
           pure Nothing
-
--- | Refactoring loop: review touched + surrounding pages, improve until convergence
-refactorLoop :: AppConfig -> [WikiPage] -> [FilePath] -> T.Text -> Int -> IO ()
-refactorLoop config allPages touchedPaths identity passNum = do
-  let maxPasses = 5 :: Int
-  if passNum >= maxPasses
-    then TIO.putStrLn "  Max refactoring passes reached."
-    else do
-      TIO.putStrLn $ "  Refactoring pass " <> T.pack (show (passNum + 1)) <> "..."
-      result <- proposeRefactoring config allPages touchedPaths identity
-      case result of
-        Left err -> TIO.putStrLn $ "  Refactoring error: " <> T.pack (show err)
-        Right refResult -> do
-          TIO.putStrLn $ "  " <> refactorSummary refResult
-          if refactorDone refResult || null (refactorContributions refResult)
-            then TIO.putStrLn "  Wiki converged — no more improvements needed.\n"
-            else do
-              -- Push each refactoring contribution
-              mapM_ (pushRefactorContrib config allPages) (refactorContributions refResult)
-              let newTouched = touchedPaths <>
-                    map contribPath (refactorContributions refResult)
-              -- Re-fetch pages for next pass
-              freshPages <- fetchWikiGracefully config
-              refactorLoop config freshPages newTouched identity (passNum + 1)
-
--- | Push a refactoring contribution (auto-approved, no user prompt)
-pushRefactorContrib :: AppConfig -> [WikiPage] -> WikiContribution -> IO ()
-pushRefactorContrib config pages contrib = do
-  let prefixed = contrib { contribSummary = prefixCommitMsg (contribSummary contrib) }
-  result <- pushContribution config pages prefixed
-  case result of
-    Right () -> TIO.putStrLn $ "    Pushed: " <> T.pack (contribPath prefixed)
-    Left err -> TIO.putStrLn $ "    Failed: " <> T.pack (contribPath prefixed)
-                             <> " — " <> T.pack (show err)
 
 -- | Retry pending contributions from previous sessions
 retryPending :: AppConfig -> IO ()

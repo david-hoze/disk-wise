@@ -3,6 +3,7 @@
 
 module DiskWise.Wiki
   ( fetchTree
+  , fetchFullTree
   , fetchPage
   , matchPages
   , createPage
@@ -33,6 +34,22 @@ import DiskWise.Types
 -- | Fetch the full tree of wiki pages from the GitHub wiki repo
 fetchTree :: AppConfig -> IO (Either DiskWiseError [WikiPage])
 fetchTree config = do
+  let url = "/repos/" <> T.unpack (configWikiOwner config)
+         <> "/" <> T.unpack (configWikiRepo config)
+         <> "/git/trees/main?recursive=1"
+  result <- githubGet config url
+  case result of
+    Left err -> pure (Left err)
+    Right val -> do
+      let paths = extractTreePaths val
+          mdPaths = filter (\p -> T.isSuffixOf ".md" p && p /= "Home.md"
+                               && not (T.isPrefixOf "_meta/" p)) paths
+      pages <- mapM (\p -> fetchPage config (T.unpack p)) mdPaths
+      pure $ Right [pg | Right pg <- pages]
+
+-- | Fetch the full tree including _meta/ pages (for the gardener)
+fetchFullTree :: AppConfig -> IO (Either DiskWiseError [WikiPage])
+fetchFullTree config = do
   let url = "/repos/" <> T.unpack (configWikiOwner config)
          <> "/" <> T.unpack (configWikiRepo config)
          <> "/git/trees/main?recursive=1"

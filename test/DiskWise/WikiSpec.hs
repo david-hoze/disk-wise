@@ -6,7 +6,7 @@ import qualified Data.Text as T
 import Test.Hspec
 
 import DiskWise.Types
-import DiskWise.Wiki (matchPages, parsePagePatterns, parsePageToolNames, sanitizeContent)
+import DiskWise.Wiki (matchPages, parsePagePatterns, parsePageToolNames)
 
 -- | Helper to make a wiki page for testing
 mkPage :: FilePath -> T.Text -> T.Text -> T.Text -> WikiPage
@@ -106,3 +106,16 @@ spec = do
             ]
           result = matchPages [npmPage, dockerPage] findings
       length result `shouldBe` 2
+
+  describe "_meta/ filtering" $ do
+    it "fetchTree excludes _meta/ paths (simulated via filter)" $ do
+      -- We can't call fetchTree without a real API, but we test the filter logic
+      let allPaths = ["tools/npm.md", "_meta/gardening-log.md", "_meta/notes.md", "Home.md", "tools/docker.md"]
+          filtered = filter (\p -> T.isSuffixOf ".md" p && p /= "Home.md"
+                                && not (T.isPrefixOf "_meta/" p)) allPaths
+      filtered `shouldBe` ["tools/npm.md", "tools/docker.md"]
+
+    it "fetchFullTree includes _meta/ paths (simulated via filter)" $ do
+      let allPaths = ["tools/npm.md", "_meta/gardening-log.md", "_meta/notes.md", "Home.md", "tools/docker.md"]
+          filtered = filter (\p -> T.isSuffixOf ".md" p && p /= "Home.md") allPaths
+      filtered `shouldBe` ["tools/npm.md", "_meta/gardening-log.md", "_meta/notes.md", "tools/docker.md"]

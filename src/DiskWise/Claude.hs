@@ -3,18 +3,20 @@
 
 module DiskWise.Claude
   ( investigate
-  , proposeRefactoring
   , callClaude
   , callClaudeCode
   , callClaudeApi
+  , callClaudeGarden
   , buildPrompt
   , buildSystemPrompt
   , buildLearnPrompt
-  , buildRefactorPrompt
+  , buildGardenSystemPrompt
+  , buildGardenPrompt
   , parseAdvice
   , parseRefactorResult
   , agentIdentity
   , prefixCommitMsg
+  , prefixGardenerMsg
   ) where
 
 import Control.Exception (catch, SomeException, try)
@@ -63,32 +65,39 @@ investigate config scanOutput matchedPages novelFindings = do
     Left err -> pure (Left err)
     Right text -> pure (parseAdvice text)
 
--- | Ask Claude to propose refactoring improvements to wiki pages
-proposeRefactoring :: AppConfig -> [WikiPage] -> [FilePath] -> T.Text
-                   -> IO (Either DiskWiseError RefactorResult)
-proposeRefactoring config allPages touchedPaths identity = do
-  let userPrompt = buildRefactorPrompt allPages touchedPaths identity
-      sysPrompt = buildRefactorSystemPrompt
-  result <- callClaude config sysPrompt userPrompt
-  case result of
-    Left err -> pure (Left err)
-    Right text -> pure (parseRefactorResult text)
+-- | Prefix a commit message with the diskwise-gardener convention
+prefixGardenerMsg :: T.Text -> T.Text
+prefixGardenerMsg msg
+  | "diskwise-gardener:" `T.isPrefixOf` msg = msg
+  | otherwise = "diskwise-gardener: " <> msg
 
 -- | Try Claude Code CLI first, fall back to API key
 callClaude :: AppConfig -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
 callClaude config sysPrompt userPrompt = do
-  cliResult <- callClaudeCode sysPrompt userPrompt
+  cliResult <- callClaudeCode Nothing sysPrompt userPrompt
   case cliResult of
     Right text -> pure (Right text)
     Left _ ->
       if T.null (configApiKey config)
       then pure (Left (ClaudeError "No Claude access: CLI unavailable and no API key set"))
-      else callClaudeApi config sysPrompt userPrompt
+      else callClaudeApi config Nothing sysPrompt userPrompt
+
+-- | Call Claude with Opus 4.6 model override (for gardener)
+callClaudeGarden :: AppConfig -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
+callClaudeGarden config sysPrompt userPrompt = do
+  let model = Just "claude-opus-4-6"
+  cliResult <- callClaudeCode model sysPrompt userPrompt
+  case cliResult of
+    Right text -> pure (Right text)
+    Left _ ->
+      if T.null (configApiKey config)
+      then pure (Left (ClaudeError "No Claude access: CLI unavailable and no API key set"))
+      else callClaudeApi config model sysPrompt userPrompt
 
 -- | Invoke Claude Code CLI as subprocess with --print flag
 -- Uses sh -c to invoke claude, which handles PATH resolution on all platforms
-callClaudeCode :: T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
-callClaudeCode sysPrompt userPrompt = do
+callClaudeCode :: Maybe T.Text -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
+callClaudeCode modelOverride sysPrompt userPrompt = do
   -- First check claude is available
   checkResult <- try $ readProcess "sh" ["-c", "claude --version 2>/dev/null"] ""
     :: IO (Either SomeException String)
@@ -97,7 +106,11 @@ callClaudeCode sysPrompt userPrompt = do
     Right v | null v -> pure (Left (ClaudeError "Claude CLI not found"))
     Right _ -> do
       -- Use shell to invoke claude (handles PATH on MINGW/Windows)
-      let cmd = "claude --print --system-prompt " <> shellQuote (T.unpack sysPrompt)
+      let modelFlag = case modelOverride of
+            Just m  -> " --model " <> shellQuote (T.unpack m)
+            Nothing -> ""
+          cmd = "claude --print" <> modelFlag
+                <> " --system-prompt " <> shellQuote (T.unpack sysPrompt)
                 <> " " <> shellQuote (T.unpack userPrompt)
       result <- try $ readCreateProcessWithExitCode (shell cmd) ""
       case result of
@@ -115,12 +128,13 @@ shellQuote s = "'" <> concatMap esc s <> "'"
         esc c    = [c]
 
 -- | Call Claude via the Anthropic API
-callClaudeApi :: AppConfig -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
-callClaudeApi config sysPrompt userPrompt = do
+callClaudeApi :: AppConfig -> Maybe T.Text -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)
+callClaudeApi config modelOverride sysPrompt userPrompt = do
   manager <- newManager tlsManagerSettings
 
-  let reqBody = object
-        [ "model"      .= configModel config
+  let model = maybe (configModel config) id modelOverride
+      reqBody = object
+        [ "model"      .= model
         , "max_tokens" .= (8192 :: Int)
         , "system"     .= sysPrompt
         , "messages"   .= [ object
@@ -292,11 +306,11 @@ buildLearnPrompt sessionLog identity = T.unlines $
     formatEvent (ContribFailed contrib err) =
       "WIKI FAILED: " <> T.pack (contribPath contrib) <> " — " <> err
 
--- | Build the refactoring system prompt
-buildRefactorSystemPrompt :: T.Text
-buildRefactorSystemPrompt = T.unlines
-  [ "You are DiskWise's wiki refactoring agent. Your job is to improve the quality"
-  , "and organization of the wiki after new content has been added."
+-- | Build the gardener-specific system prompt
+buildGardenSystemPrompt :: T.Text
+buildGardenSystemPrompt = T.unlines
+  [ "You are DiskWise's wiki gardener. Your job is to improve the quality"
+  , "and organization of the wiki knowledge base."
   , ""
   , "You MUST respond with valid JSON in this exact structure:"
   , "{"
@@ -324,27 +338,37 @@ buildRefactorSystemPrompt = T.unlines
   , "- Fix formatting inconsistencies"
   , "- Add missing ## History entries"
   , ""
+  , "IMPORTANT about _meta/ pages:"
+  , "_meta/ pages are YOUR notes to your future self, not content to refactor."
+  , "Do NOT reorganize, merge, or rewrite _meta/ pages as if they were wiki content."
+  , "You may CREATE or AMEND _meta/ pages to record your own gardening notes."
+  , ""
   , "Do NOT:"
   , "- Remove useful information"
   , "- Add speculative content not based on the existing pages"
   , "- Change the meaning of existing advice"
+  , "- Treat _meta/ pages as wiki content to be refactored"
   ]
 
--- | Build the user prompt for a refactoring pass
-buildRefactorPrompt :: [WikiPage] -> [FilePath] -> T.Text -> T.Text
-buildRefactorPrompt allPages touchedPaths identity = T.unlines $
-  [ "== PAGES TOUCHED THIS SESSION =="
-  ] <> map T.pack touchedPaths <>
+-- | Build the user prompt for a gardening pass
+buildGardenPrompt :: [WikiPage] -> [WikiPage] -> T.Text -> T.Text
+buildGardenPrompt contentPages metaPages identity = T.unlines $
+  [ "== WIKI CONTENT PAGES =="
+  ] <> concatMap formatPage contentPages <>
   [ ""
-  , "== ALL WIKI PAGES =="
-  ] <> concatMap formatPage allPages <>
+  , "== META PAGES (your notes from previous sessions) =="
+  ] <>
+  (if null metaPages
+   then ["(No meta pages yet — this is your first session.)"]
+   else concatMap formatPage metaPages
+  ) <>
   [ ""
   , "== AGENT IDENTITY =="
   , identity
   , ""
-  , "Review the pages touched this session and their surrounding pages."
-  , "Propose improvements to organization, clarity, and structure."
+  , "Review the wiki content pages and improve their organization, clarity, and structure."
   , "Each improvement should be a separate contribution."
+  , "You may also write to _meta/ pages to leave notes for your next gardening session."
   ]
   where
     formatPage page =

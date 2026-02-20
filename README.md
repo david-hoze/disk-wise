@@ -18,12 +18,18 @@ DiskWise scans your filesystem, consults a community-maintained wiki for context
                                           │ + Wiki edits │
                                           └──────┬───────┘
                                                   │
-                                     ┌────────────┼────────────┐
-                                     ▼            ▼            ▼
-                              ┌──────────┐ ┌───────────┐ ┌──────────┐
-                              │   Act    │ │   Learn   │ │ Refactor │
-                              │ (cleanup)│ │(wiki push)│ │(improve) │
-                              └──────────┘ └───────────┘ └──────────┘
+                                     ┌────────────┤
+                                     ▼            ▼
+                              ┌──────────┐ ┌───────────┐
+                              │   Act    │ │   Learn   │
+                              │ (cleanup)│ │(wiki push)│
+                              └──────────┘ └───────────┘
+
+                     ┌──────────────────────────────────────┐
+                     │   diskwise garden (separate command)  │
+                     │   Gardener (Opus 4.6) improves wiki  │
+                     │   quality, maintains _meta/ notes     │
+                     └──────────────────────────────────────┘
 ```
 
 ### The Flow
@@ -31,7 +37,7 @@ DiskWise scans your filesystem, consults a community-maintained wiki for context
 1. **Investigate**: A generic scanner runs `df`, `du`, and `find` to discover what's large — no tool-specific knowledge baked in. The agent fetches wiki pages from GitHub and matches them to findings by path patterns and tool names. Unmatched findings are flagged as novel. Everything goes to Claude for interpretation.
 2. **Act**: Claude proposes cleanup actions with risk levels and size estimates. You confirm each one before it runs. Nothing is ever deleted without your say-so.
 3. **Learn**: Claude reviews the entire session — what was scanned, what actions ran, what failed, what surprised it — and drafts wiki contributions for anything useful. The bar is low: if it might save a future agent five seconds, it gets written.
-4. **Refactor**: After learning, Claude reviews the pages it touched and surrounding pages, improving quality — merging duplicates, rewriting, reorganizing. It loops until the wiki converges (or hits 5 passes). Each pass is a separate commit.
+4. **Garden** (separate command): `diskwise garden` uses Claude Opus 4.6 to review the entire wiki and improve quality — merging duplicates, rewriting, reorganizing. It maintains its own notes in `_meta/` pages across sessions. Runs up to 5 passes per invocation.
 
 ### Example Session
 
@@ -162,6 +168,17 @@ diskwise contribute '{"type":"CreatePage","path":"python/pip.md","content":"# pi
 ```
 
 All batch subcommands write progress to stderr and results to stdout.
+
+### Garden Mode
+
+The gardener command uses Claude Opus 4.6 to improve wiki quality — merging duplicates, rewriting unclear content, reorganizing structure. It maintains its own notes in `_meta/` pages across sessions.
+
+```bash
+# Run the gardener (uses Opus 4.6, no extra config needed)
+diskwise garden
+```
+
+The gardener runs up to 5 improvement passes, re-reading the wiki between each pass so it can see its own changes. It records a session log in `_meta/gardening-log.md`.
 
 ## Project Structure
 
