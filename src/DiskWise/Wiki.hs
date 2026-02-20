@@ -12,6 +12,11 @@ module DiskWise.Wiki
   , parsePagePatterns
   , parsePageToolNames
   , sanitizeContent
+  , updatePageMeta
+  , parseMetaComment
+  , renderMetaComment
+  , PageMeta(..)
+  , defaultPageMeta
   ) where
 
 import Control.Concurrent (threadDelay)
@@ -23,6 +28,8 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Vector as V
+import Data.Time (UTCTime, getCurrentTime)
+import Data.Time.Format (formatTime, parseTimeM, defaultTimeLocale)
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Header (hContentType, hAuthorization)
@@ -98,14 +105,18 @@ parsePageResponse path (Object obj) = do
         Right bs -> Right (TE.decodeUtf8 bs)
         Left err -> Left (ParseError (T.pack err))
     _ -> Left (ParseError "No content field in response")
-  let topic = T.toLower $ T.pack $ takeWhile (/= '.') $ last $ splitPath path
-      title = extractTitle content
+  let (meta, body) = parseMetaComment content
+      topic = T.toLower $ T.pack $ takeWhile (/= '.') $ last $ splitPath path
+      title = extractTitle body
   Right WikiPage
-    { pageRelPath = path
-    , pageTopic   = topic
-    , pageTitle   = title
-    , pageBody    = content
-    , pageSha     = sha
+    { pageRelPath      = path
+    , pageTopic        = topic
+    , pageTitle        = title
+    , pageBody         = body
+    , pageSha          = sha
+    , pageLastVerified = metaLastVerified meta
+    , pageVerifyCount  = metaVerifyCount meta
+    , pageFailCount    = metaFailCount meta
     }
   where
     splitPath = go []
@@ -178,6 +189,72 @@ parsePageToolNames page =
       , T.isPrefixOf "## " line
       ]
 
+-- | Internal metadata extracted from/embedded in wiki pages
+data PageMeta = PageMeta
+  { metaLastVerified :: Maybe UTCTime
+  , metaVerifyCount  :: Int
+  , metaFailCount    :: Int
+  } deriving (Show, Eq)
+
+defaultPageMeta :: PageMeta
+defaultPageMeta = PageMeta Nothing 0 0
+
+-- | Parse a @\<!-- diskwise-meta: {...} --\>@ comment from the top of page content.
+-- Returns the parsed metadata and the remaining body (without the comment).
+parseMetaComment :: T.Text -> (PageMeta, T.Text)
+parseMetaComment content =
+  let prefix = "<!-- diskwise-meta: "
+      suffix = " -->"
+  in case T.lines content of
+    (firstLine : rest)
+      | T.isPrefixOf prefix firstLine && T.isSuffixOf suffix firstLine ->
+          let jsonStr = T.drop (T.length prefix) (T.dropEnd (T.length suffix) firstLine)
+              meta = case eitherDecode (BL.fromStrict (TE.encodeUtf8 jsonStr)) of
+                Right obj -> parseMetaJson obj
+                Left _    -> defaultPageMeta
+              -- Skip blank line after meta comment if present
+              body = case rest of
+                ("" : bodyLines) -> T.unlines bodyLines
+                _                -> T.unlines rest
+          in (meta, body)
+    _ -> (defaultPageMeta, content)
+
+parseMetaJson :: Value -> PageMeta
+parseMetaJson (Object obj) = PageMeta
+  { metaLastVerified = case KM.lookup "last_verified" obj of
+      Just (String s) -> parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" (T.unpack s)
+      _               -> Nothing
+  , metaVerifyCount = case KM.lookup "verify_count" obj of
+      Just (Number n) -> round n
+      _               -> 0
+  , metaFailCount = case KM.lookup "fail_count" obj of
+      Just (Number n) -> round n
+      _               -> 0
+  }
+parseMetaJson _ = defaultPageMeta
+
+-- | Render metadata as an HTML comment to prepend to page content
+renderMetaComment :: PageMeta -> T.Text
+renderMetaComment meta =
+  let timeStr = case metaLastVerified meta of
+        Just t  -> "\"" <> T.pack (formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" t) <> "\""
+        Nothing -> "null"
+  in "<!-- diskwise-meta: {\"last_verified\":" <> timeStr
+     <> ",\"verify_count\":" <> T.pack (show (metaVerifyCount meta))
+     <> ",\"fail_count\":" <> T.pack (show (metaFailCount meta))
+     <> "} -->\n"
+
+-- | Update page metadata: increment verify or fail count and set last verified time
+updatePageMeta :: Bool -> IO (WikiPage -> WikiPage)
+updatePageMeta success = do
+  now <- getCurrentTime
+  pure $ \page ->
+    if success
+    then page { pageVerifyCount = pageVerifyCount page + 1
+              , pageLastVerified = Just now
+              }
+    else page { pageFailCount = pageFailCount page + 1 }
+
 -- | Replace home directory paths with ~ and strip usernames (pure version)
 -- Takes the home directory as a parameter for testability
 sanitizeContent :: T.Text -> T.Text
@@ -195,12 +272,13 @@ sanitizeContentIO content = do
 createPage :: AppConfig -> WikiContribution -> IO (Either DiskWiseError ())
 createPage config contrib = do
   sanitized <- sanitizeContentIO (contribContent contrib)
-  let url = "/repos/" <> T.unpack (configWikiOwner config)
+  let withMeta = renderMetaComment defaultPageMeta <> sanitized
+      url = "/repos/" <> T.unpack (configWikiOwner config)
          <> "/" <> T.unpack (configWikiRepo config)
          <> "/contents/" <> contribPath contrib
       body = object
         [ "message" .= contribSummary contrib
-        , "content" .= TE.decodeUtf8 (B64.encode (TE.encodeUtf8 sanitized))
+        , "content" .= TE.decodeUtf8 (B64.encode (TE.encodeUtf8 withMeta))
         ]
   result <- githubPut config url body
   case result of
@@ -211,12 +289,18 @@ createPage config contrib = do
 updatePage :: AppConfig -> WikiPage -> WikiContribution -> IO (Either DiskWiseError ())
 updatePage config page contrib = do
   sanitized <- sanitizeContentIO (contribContent contrib)
-  let url = "/repos/" <> T.unpack (configWikiOwner config)
+  let pageMeta = PageMeta
+        { metaLastVerified = pageLastVerified page
+        , metaVerifyCount  = pageVerifyCount page
+        , metaFailCount    = pageFailCount page
+        }
+      withMeta = renderMetaComment pageMeta <> sanitized
+      url = "/repos/" <> T.unpack (configWikiOwner config)
          <> "/" <> T.unpack (configWikiRepo config)
          <> "/contents/" <> contribPath contrib
       body = object
         [ "message" .= contribSummary contrib
-        , "content" .= TE.decodeUtf8 (B64.encode (TE.encodeUtf8 sanitized))
+        , "content" .= TE.decodeUtf8 (B64.encode (TE.encodeUtf8 withMeta))
         , "sha"     .= pageSha page
         ]
   result <- githubPut config url body

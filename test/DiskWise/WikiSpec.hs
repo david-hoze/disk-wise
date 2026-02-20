@@ -6,16 +6,20 @@ import qualified Data.Text as T
 import Test.Hspec
 
 import DiskWise.Types
-import DiskWise.Wiki (matchPages, parsePagePatterns, parsePageToolNames)
+import DiskWise.Wiki (matchPages, parsePagePatterns, parsePageToolNames,
+                      parseMetaComment, renderMetaComment, PageMeta(..))
 
 -- | Helper to make a wiki page for testing
 mkPage :: FilePath -> T.Text -> T.Text -> T.Text -> WikiPage
 mkPage path topic title body = WikiPage
-  { pageRelPath = path
-  , pageTopic   = topic
-  , pageTitle   = title
-  , pageBody    = body
-  , pageSha     = "abc123"
+  { pageRelPath      = path
+  , pageTopic        = topic
+  , pageTitle        = title
+  , pageBody         = body
+  , pageSha          = "abc123"
+  , pageLastVerified = Nothing
+  , pageVerifyCount  = 0
+  , pageFailCount    = 0
   }
 
 -- | Helper to make a finding for testing
@@ -119,3 +123,25 @@ spec = do
       let allPaths = ["tools/npm.md", "_meta/gardening-log.md", "_meta/notes.md", "Home.md", "tools/docker.md"]
           filtered = filter (\p -> T.isSuffixOf ".md" p && p /= "Home.md") allPaths
       filtered `shouldBe` ["tools/npm.md", "_meta/gardening-log.md", "_meta/notes.md", "tools/docker.md"]
+
+  describe "parseMetaComment" $ do
+    it "parses metadata from HTML comment at top of page" $ do
+      let content = "<!-- diskwise-meta: {\"last_verified\":null,\"verify_count\":3,\"fail_count\":1} -->\n\n# npm\n\nSome content\n"
+      snd (parseMetaComment content) `shouldSatisfy` T.isPrefixOf "# npm"
+      fst (parseMetaComment content) `shouldSatisfy` (\m -> metaVerifyCount m == 3)
+      fst (parseMetaComment content) `shouldSatisfy` (\m -> metaFailCount m == 1)
+
+    it "returns defaults when no meta comment present" $ do
+      let content = "# npm\n\nSome content\n"
+          (meta, body) = parseMetaComment content
+      metaVerifyCount meta `shouldBe` 0
+      metaFailCount meta `shouldBe` 0
+      metaLastVerified meta `shouldBe` Nothing
+      body `shouldBe` content
+
+  describe "renderMetaComment" $ do
+    it "produces a parseable meta comment" $ do
+      let rendered = renderMetaComment (PageMeta Nothing 5 2)
+          (meta, _) = parseMetaComment rendered
+      metaVerifyCount meta `shouldBe` 5
+      metaFailCount meta `shouldBe` 2

@@ -26,14 +26,29 @@ spec = do
         , entryModTime = testTime
         }
 
-  describe "WikiPage JSON round-trip" $
+  describe "WikiPage JSON round-trip" $ do
     it "wiki page" $
       jsonRoundTrip WikiPage
-        { pageRelPath = "tools/npm.md"
-        , pageTopic   = "npm"
-        , pageTitle   = "npm cache cleanup"
-        , pageBody    = "# npm\n\nRun `npm cache clean --force`\n"
-        , pageSha     = "abc123def456"
+        { pageRelPath      = "tools/npm.md"
+        , pageTopic        = "npm"
+        , pageTitle        = "npm cache cleanup"
+        , pageBody         = "# npm\n\nRun `npm cache clean --force`\n"
+        , pageSha          = "abc123def456"
+        , pageLastVerified = Nothing
+        , pageVerifyCount  = 0
+        , pageFailCount    = 0
+        }
+
+    it "wiki page with metadata" $
+      jsonRoundTrip WikiPage
+        { pageRelPath      = "tools/npm.md"
+        , pageTopic        = "npm"
+        , pageTitle        = "npm cache cleanup"
+        , pageBody         = "# npm\n\nRun `npm cache clean --force`\n"
+        , pageSha          = "abc123def456"
+        , pageLastVerified = Just testTime
+        , pageVerifyCount  = 5
+        , pageFailCount    = 1
         }
 
   describe "ContribType JSON round-trip" $ do

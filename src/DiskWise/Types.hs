@@ -36,11 +36,14 @@ instance FromJSON DiskEntry
 
 -- | A page fetched from the GitHub wiki
 data WikiPage = WikiPage
-  { pageRelPath :: FilePath      -- ^ Path relative to wiki root (e.g. "tools/npm.md")
-  , pageTopic   :: Text          -- ^ Topic extracted from path/title
-  , pageTitle   :: Text          -- ^ Title from first heading or filename
-  , pageBody    :: Text          -- ^ Full markdown body
-  , pageSha     :: Text          -- ^ Git SHA needed for updates
+  { pageRelPath      :: FilePath      -- ^ Path relative to wiki root (e.g. "tools/npm.md")
+  , pageTopic        :: Text          -- ^ Topic extracted from path/title
+  , pageTitle        :: Text          -- ^ Title from first heading or filename
+  , pageBody         :: Text          -- ^ Full markdown body
+  , pageSha          :: Text          -- ^ Git SHA needed for updates
+  , pageLastVerified :: Maybe UTCTime -- ^ When this page was last verified on a real system
+  , pageVerifyCount  :: Int           -- ^ How many agents have verified this page's advice
+  , pageFailCount    :: Int           -- ^ How many times advice from this page led to failures
   } deriving (Show, Eq, Generic)
 
 instance ToJSON WikiPage

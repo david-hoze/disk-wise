@@ -40,7 +40,7 @@ spec = do
 
     it "shows wiki pages when available" $ do
       let page = WikiPage "tools/npm.md" "npm" "npm cleanup"
-                   "# npm\nClean with npm cache clean" "sha123"
+                   "# npm\nClean with npm cache clean" "sha123" Nothing 0 0
           finding = Finding "/home/.npm" 1000000 "cache" "npm cache 1GB"
           prompt = buildPrompt "scan output" [(page, [finding])] []
       prompt `shouldSatisfy` T.isInfixOf "npm cleanup"
@@ -82,8 +82,8 @@ spec = do
 
   describe "buildGardenPrompt" $ do
     it "separates content and meta sections" $ do
-      let contentPage = WikiPage "tools/npm.md" "npm" "npm" "# npm content" "sha"
-          metaPage = WikiPage "_meta/notes.md" "notes" "notes" "# gardener notes" "sha2"
+      let contentPage = WikiPage "tools/npm.md" "npm" "npm" "# npm content" "sha" Nothing 0 0
+          metaPage = WikiPage "_meta/notes.md" "notes" "notes" "# gardener notes" "sha2" Nothing 0 0
           prompt = buildGardenPrompt [contentPage] [metaPage] "agent@x"
       prompt `shouldSatisfy` T.isInfixOf "WIKI CONTENT PAGES"
       prompt `shouldSatisfy` T.isInfixOf "# npm content"
@@ -91,7 +91,7 @@ spec = do
       prompt `shouldSatisfy` T.isInfixOf "# gardener notes"
 
     it "shows first session message when no meta pages" $ do
-      let contentPage = WikiPage "tools/npm.md" "npm" "npm" "# npm" "sha"
+      let contentPage = WikiPage "tools/npm.md" "npm" "npm" "# npm" "sha" Nothing 0 0
           prompt = buildGardenPrompt [contentPage] [] "agent@x"
       prompt `shouldSatisfy` T.isInfixOf "first session"
 
