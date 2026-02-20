@@ -230,6 +230,7 @@ data SessionSummary = SessionSummary
   , summaryBytesFreed    :: Maybe Integer
   , summaryUserFeedback  :: Maybe Text
   , summaryFailedCmds    :: [(Text, Text)]  -- ^ (command, error)
+  , summaryCleanedPaths  :: [(FilePath, Integer)]  -- ^ (path, bytes freed) for regrowth tracking
   } deriving (Show, Eq, Generic)
 
 instance ToJSON SessionSummary

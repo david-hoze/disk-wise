@@ -20,8 +20,8 @@ import DiskWise.WikiRouter
 import DiskWise.Claude (investigate, callClaude, buildSystemPrompt, buildLearnPrompt,
                         parseAdvice, agentIdentity, prefixCommitMsg)
 import DiskWise.Scanner
-import DiskWise.History (saveSessionSummary, loadSessionHistory, summarizeSession,
-                         formatSessionHistory)
+import DiskWise.History (saveSessionSummary, loadSessionHistory, loadMostRecentSummary,
+                         summarizeSession, formatSessionHistory)
 
 -- | Main application entry point
 runApp :: AppConfig -> IO ()
@@ -66,6 +66,11 @@ runInvestigate config = do
   identity <- agentIdentity
   history <- loadSessionHistory
 
+  -- Step 0: Follow up on previous session
+  prevSummary <- loadMostRecentSummary
+  regrowthReport <- checkRegrowth prevSummary
+  askDelayedFeedback sessionRef prevSummary
+
   -- Step 1: Scan the system
   TIO.putStrLn "\n-- Scanning system --\n"
   scanOutput <- scanSystem config
@@ -109,6 +114,7 @@ runInvestigate config = do
       TIO.putStrLn "-- Learning from session --\n"
       session <- readIORef sessionRef
       let historyContext = formatSessionHistory history
+                       <> (if T.null regrowthReport then "" else "\n" <> regrowthReport)
       learnResult <- callClaude config buildSystemPrompt
         (buildLearnPrompt session identity historyContext)
       let allContribs = case learnResult of
@@ -366,6 +372,65 @@ postCleanupFeedback sessionRef = do
   where
     isExecuted (ActionExecuted _) = True
     isExecuted _                  = False
+
+-- | Check whether previously cleaned paths have regrown since last session
+checkRegrowth :: Maybe SessionSummary -> IO T.Text
+checkRegrowth Nothing = pure ""
+checkRegrowth (Just summary) = do
+  let cleaned = summaryCleanedPaths summary
+  if null cleaned
+    then pure ""
+    else do
+      TIO.putStrLn "-- Checking for regrowth from last session --\n"
+      reports <- mapM checkOne cleaned
+      let regrown = filter (not . T.null) reports
+      if null regrown
+        then do
+          TIO.putStrLn "  No significant regrowth detected.\n"
+          pure ""
+        else do
+          mapM_ TIO.putStrLn regrown
+          TIO.putStrLn ""
+          let report = T.unlines $
+                [ "== REGROWTH REPORT =="
+                , "The following paths cleaned in the previous session have regrown:"
+                ] <> regrown <>
+                [ ""
+                , "Consider whether these paths need recurring cleanup automation."
+                ]
+          pure report
+  where
+    checkOne (path, freedBefore) = do
+      currentSize <- measurePathSize path
+      case currentSize of
+        Just sz | sz > freedBefore `div` 2 ->
+          pure $ "  Regrowth: " <> T.pack path <> " is now "
+            <> formatSize sz <> " (was freed " <> formatSize freedBefore <> ")"
+        _ -> pure ""
+    formatSize b
+      | b >= 1024 * 1024 * 1024 = T.pack (show (b `div` (1024 * 1024 * 1024))) <> " GB"
+      | b >= 1024 * 1024        = T.pack (show (b `div` (1024 * 1024))) <> " MB"
+      | otherwise               = T.pack (show (b `div` 1024)) <> " KB"
+
+-- | Ask about delayed side effects from the previous session
+askDelayedFeedback :: IORef SessionLog -> Maybe SessionSummary -> IO ()
+askDelayedFeedback _ Nothing = pure ()
+askDelayedFeedback sessionRef (Just summary) = do
+  let hadActions = summaryActionsRun summary > 0
+  when hadActions $ do
+    TIO.putStrLn "-- Follow-up on previous session --\n"
+    TIO.putStr "Did anything break after last session's cleanup?\n[n] No  [y] Yes\n> "
+    hFlush stdout
+    answer <- getLine
+    case answer of
+      "y" -> do
+        TIO.putStr "Briefly describe: "
+        hFlush stdout
+        feedback <- getLine
+        modifyIORef sessionRef (`addEvent` UserFeedback
+          (T.pack ("delayed issue from previous session: " <> feedback)))
+      _ -> pure ()
+    TIO.putStrLn ""
 
 -- | Ask the user why they skipped a cleanup action
 askSkipReason :: IO SkipReason

@@ -40,6 +40,15 @@ spec = do
       summaryUserFeedback summary `shouldBe` Just "docker broke"
       length (summarySkipReasons summary) `shouldBe` 1
       length (summaryFailedCmds summary) `shouldBe` 1
+      -- action1 command has no path tokens, so cleanedPaths should be empty
+      summaryCleanedPaths summary `shouldBe` []
+
+    it "populates cleanedPaths from successful actions with paths" $ do
+      let action = CleanupAction "Remove logs" "rm -rf /var/log/old" "medium" Nothing Nothing
+          outcome = CleanupOutcome action True "done" (Just 1000000) Nothing 0 0
+          session = emptySessionLog { logEvents = [ActionExecuted outcome] }
+      summary <- summarizeSession session
+      summaryCleanedPaths summary `shouldBe` [("/var/log/old", 1000000)]
 
     it "handles empty session log" $ do
       summary <- summarizeSession emptySessionLog
@@ -62,6 +71,7 @@ spec = do
             , summaryBytesFreed    = Just (500 * 1024 * 1024)
             , summaryUserFeedback  = Nothing
             , summaryFailedCmds    = []
+            , summaryCleanedPaths  = []
             }
           formatted = formatSessionHistory [summary]
       formatted `shouldSatisfy` (/= "")
@@ -78,6 +88,7 @@ spec = do
             , summaryBytesFreed    = Nothing
             , summaryUserFeedback  = Nothing
             , summaryFailedCmds    = []
+            , summaryCleanedPaths  = []
             }
           summary2 = summary1
             { summarySkipReasons = [ ("Remove dist-newstyle", TooRisky)
@@ -99,5 +110,6 @@ spec = do
             , summaryFindingCount = 0, summaryActionsRun = 0, summaryActionsFailed = 0
             , summarySkipReasons = [], summaryBytesFreed = Nothing
             , summaryUserFeedback = Nothing, summaryFailedCmds = []
+            , summaryCleanedPaths = []
             }
       computeSkipPatterns [summary] `shouldBe` []

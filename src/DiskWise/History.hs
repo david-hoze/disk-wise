@@ -4,6 +4,7 @@
 module DiskWise.History
   ( saveSessionSummary
   , loadSessionHistory
+  , loadMostRecentSummary
   , summarizeSession
   , formatSessionHistory
   , computeSkipPatterns
@@ -61,6 +62,13 @@ summarizeSession sessionLog = do
     , summaryUserFeedback  = lastFeedback (logEvents sessionLog)
     , summaryFailedCmds    = [ (actionCommand (outcomeAction o), outcomeMessage o)
                              | ActionFailed o <- logEvents sessionLog ]
+    , summaryCleanedPaths  = [ (path, b)
+                             | ActionExecuted o <- logEvents sessionLog
+                             , outcomeSuccess o
+                             , Just b <- [outcomeBytesFreed o]
+                             , let path = extractPath (actionCommand (outcomeAction o))
+                             , not (null path)
+                             ]
     }
 
 -- | Sum all bytes freed across executed actions
@@ -150,3 +158,21 @@ computeSkipPatterns summaries =
         ]
   in [ (desc, length reasons, reasons)
      | (desc, reasons) <- Map.toList skipMap ]
+
+-- | Load just the most recent session summary, if any.
+loadMostRecentSummary :: IO (Maybe SessionSummary)
+loadMostRecentSummary = do
+  history <- loadSessionHistory
+  pure $ case history of
+    [] -> Nothing
+    _  -> Just (last history)
+
+-- | Extract a path from a cleanup command.
+-- Looks for tokens starting with / or ~ (the target path of the cleanup).
+extractPath :: T.Text -> FilePath
+extractPath cmd =
+  let ws = T.words cmd
+      paths = filter (\w -> T.isPrefixOf "/" w || T.isPrefixOf "~" w) ws
+  in case paths of
+    (p:_) -> T.unpack p
+    []    -> ""

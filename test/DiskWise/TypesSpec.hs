@@ -175,6 +175,7 @@ spec = do
         , summaryBytesFreed    = Just 524288000
         , summaryUserFeedback  = Nothing
         , summaryFailedCmds    = [("docker prune", "permission denied")]
+        , summaryCleanedPaths  = [("/home/.cache/npm", 524288000)]
         }
 
   describe "SessionLog" $ do
