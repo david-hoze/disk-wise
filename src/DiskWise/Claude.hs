@@ -323,12 +323,18 @@ formatOutcomeHistory page
 
 -- | Build a learning prompt that includes the full session history
 buildLearnPrompt :: SessionLog -> T.Text -> T.Text
-buildLearnPrompt sessionLog identity = T.unlines $
+buildLearnPrompt sessionLog identity =
+  let plat = logPlatform sessionLog
+  in T.unlines $
   [ "== SESSION REVIEW =="
   , "Review this entire session and propose wiki contributions for anything useful learned."
   , ""
   , "Before proposing a new page, check if any existing page already covers this tool."
   , "If so, propose an AmendPage with your new observations rather than a CreatePage."
+  , ""
+  , "== PLATFORM =="
+  , "OS: " <> platformOS plat <> " | Arch: " <> platformArch plat
+    <> " | Shell: " <> platformShell plat
   , ""
   , "== SCAN OUTPUT =="
   , logScanOutput sessionLog
@@ -344,6 +350,10 @@ buildLearnPrompt sessionLog identity = T.unlines $
   , ""
   , "If the actual space freed differs significantly from the wiki's estimate,"
   , "consider amending the wiki page with an observation about real-world sizes."
+  , ""
+  , "When documenting failures or platform-specific behavior, include the platform"
+  , "in the wiki page's ## Platform notes section. Use the format:"
+  , "\"On [OS] ([arch]): [observation]\""
   ]
   where
     formatEvent (ActionExecuted outcome) =

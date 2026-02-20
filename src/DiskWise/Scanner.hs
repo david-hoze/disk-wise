@@ -10,6 +10,7 @@ module DiskWise.Scanner
   , toMingwPath
   , measurePathSize
   , measureDiskFree
+  , detectPlatform
   ) where
 
 import Control.Exception (catch, SomeException)
@@ -254,3 +255,30 @@ measureDiskFree = do
                 [(n, _)] -> Just (n * 1024)
                 _        -> Nothing
          else Nothing
+
+-- | Detect the current platform (OS, architecture, shell).
+detectPlatform :: IO PlatformInfo
+detectPlatform = do
+  osName <- readCmd "uname -s"
+  archName <- readCmd "uname -m"
+  shellName <- do
+    msystem <- lookupEnv "MSYSTEM"
+    case msystem of
+      Just _ -> pure "bash"  -- MINGW always uses bash
+      Nothing -> do
+        sh <- lookupEnv "SHELL"
+        case sh of
+          Just s  -> pure (T.pack (reverse (takeWhile (/= '/') (reverse s))))
+          Nothing -> pure "sh"
+  pure PlatformInfo
+    { platformOS    = T.toLower (T.strip osName)
+    , platformArch  = T.strip archName
+    , platformShell = shellName
+    }
+  where
+    readCmd cmd = do
+      result <- readCreateProcessWithExitCode (proc "sh" ["-c", cmd]) ""
+        `catch` (\(_ :: SomeException) -> pure (ExitFailure 1, "", ""))
+      case result of
+        (ExitSuccess, out, _) -> pure (T.pack out)
+        _                     -> pure "unknown"

@@ -59,7 +59,8 @@ mainLoop config = do
 -- | Full investigation flow: scan -> parse -> wiki -> match -> Claude -> act -> learn -> refactor
 runInvestigate :: AppConfig -> IO ()
 runInvestigate config = do
-  sessionRef <- newIORef emptySessionLog
+  platform <- detectPlatform
+  sessionRef <- newIORef emptySessionLog { logPlatform = platform }
   identity <- agentIdentity
 
   -- Step 1: Scan the system

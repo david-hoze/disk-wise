@@ -13,6 +13,7 @@ module DiskWise.Types
   , DiskWiseError(..)
   , SkipReason(..)
   , CleanupOutcome(..)
+  , PlatformInfo(..)
   , SessionEvent(..)
   , SessionLog(..)
   , emptySessionLog
@@ -151,6 +152,16 @@ data CleanupOutcome = CleanupOutcome
 instance ToJSON CleanupOutcome
 instance FromJSON CleanupOutcome
 
+-- | Platform information for correlating failures with environment
+data PlatformInfo = PlatformInfo
+  { platformOS     :: Text   -- ^ "linux", "darwin", "mingw64", etc.
+  , platformArch   :: Text   -- ^ "x86_64", "aarch64", etc.
+  , platformShell  :: Text   -- ^ "bash", "zsh", "sh", etc.
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON PlatformInfo
+instance FromJSON PlatformInfo
+
 -- | An event that occurred during the session, for Claude to learn from
 data SessionEvent
   = ActionExecuted CleanupOutcome       -- ^ action executed with outcome
@@ -166,6 +177,7 @@ data SessionLog = SessionLog
   , logFindings     :: [Finding]
   , logAdvice       :: Maybe ClaudeAdvice
   , logEvents       :: [SessionEvent]
+  , logPlatform     :: PlatformInfo
   } deriving (Show, Eq)
 
 -- | Create an empty session log
@@ -175,6 +187,7 @@ emptySessionLog = SessionLog
   , logFindings   = []
   , logAdvice     = Nothing
   , logEvents     = []
+  , logPlatform   = PlatformInfo "unknown" "unknown" "unknown"
   }
 
 -- | Append an event to the session log

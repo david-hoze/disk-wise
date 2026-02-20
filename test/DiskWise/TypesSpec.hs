@@ -137,6 +137,14 @@ spec = do
     it "NotApplicable" $ jsonRoundTrip NotApplicable
     it "SkipReasonOther" $ jsonRoundTrip (SkipReasonOther "custom reason")
 
+  describe "PlatformInfo JSON round-trip" $
+    it "platform info" $
+      jsonRoundTrip PlatformInfo
+        { platformOS    = "mingw64_nt-10.0-17763"
+        , platformArch  = "x86_64"
+        , platformShell = "bash"
+        }
+
   describe "CleanupOutcome JSON round-trip" $
     it "outcome" $
       jsonRoundTrip CleanupOutcome
