@@ -6,6 +6,7 @@ import qualified Data.Text as T
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import Options.Applicative
 import System.Environment (lookupEnv)
+import System.IO (hSetEncoding, stdout, stderr, stdin)
 
 import DiskWise.Types
 import DiskWise.CLI
@@ -92,6 +93,9 @@ wikiToken = ""
 main :: IO ()
 main = do
   setLocaleEncoding utf8
+  hSetEncoding stdout utf8
+  hSetEncoding stderr utf8
+  hSetEncoding stdin utf8
   cmd <- execParser $ info (commandParser <**> helper)
     ( fullDesc
    <> progDesc "AI-powered disk cleanup with shared wiki knowledge"
