@@ -14,6 +14,7 @@ module DiskWise.Wiki
   , parsePagePatterns
   , parsePageToolNames
   , sanitizeContent
+  , stripMetaLines
   , updatePageMeta
   , parseMetaComment
   , renderMetaComment
@@ -370,6 +371,19 @@ deduplicateContribs pages = map dedup
           [] -> contrib
       | otherwise = contrib
 
+-- | Strip any @\<!-- diskwise-meta: ... --\>@ lines from content.
+-- Claude sometimes echoes back meta comments it saw in wiki pages;
+-- we strip them so only the authoritative meta line (prepended by
+-- createPage / updatePage) survives.
+stripMetaLines :: T.Text -> T.Text
+stripMetaLines content =
+  let ls = T.lines content
+      stripped = filter (not . isMetaLine) ls
+      -- Also drop a leading blank line left behind after stripping
+  in T.unlines (dropWhile T.null stripped)
+  where
+    isMetaLine l = "<!-- diskwise-meta:" `T.isPrefixOf` T.stripStart l
+
 -- | Replace home directory paths with ~ and strip usernames (pure version)
 -- Takes the home directory as a parameter for testability
 sanitizeContent :: T.Text -> T.Text
@@ -386,7 +400,7 @@ sanitizeContentIO content = do
 -- | Create a new page in the wiki
 createPage :: AppConfig -> WikiContribution -> IO (Either DiskWiseError ())
 createPage config contrib = do
-  sanitized <- sanitizeContentIO (contribContent contrib)
+  sanitized <- sanitizeContentIO (stripMetaLines (contribContent contrib))
   let withMeta = renderMetaComment defaultPageMeta <> sanitized
       url = "/repos/" <> T.unpack (configWikiOwner config)
          <> "/" <> T.unpack (configWikiRepo config)
@@ -403,7 +417,7 @@ createPage config contrib = do
 -- | Update an existing page in the wiki (requires SHA for optimistic concurrency)
 updatePage :: AppConfig -> WikiPage -> WikiContribution -> IO (Either DiskWiseError ())
 updatePage config page contrib = do
-  sanitized <- sanitizeContentIO (contribContent contrib)
+  sanitized <- sanitizeContentIO (stripMetaLines (contribContent contrib))
   let pageMeta = PageMeta
         { metaLastVerified = pageLastVerified page
         , metaVerifyCount  = pageVerifyCount page

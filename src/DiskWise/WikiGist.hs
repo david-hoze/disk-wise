@@ -26,7 +26,7 @@ import Network.HTTP.Types.Status (statusCode)
 
 import DiskWise.Types
 import DiskWise.Wiki (parseMetaComment, renderMetaComment, updatePageMeta,
-                      PageMeta(..), defaultPageMeta)
+                      stripMetaLines, PageMeta(..), defaultPageMeta)
 
 -- | Encode a wiki path for use as a gist filename.
 -- Replaces @/@ with @--@ since gists are flat (no directories).
@@ -72,7 +72,7 @@ fetchPage config path = do
 createPage :: AppConfig -> WikiContribution -> IO (Either DiskWiseError ())
 createPage config contrib = do
   let filename = encodeGistPath (contribPath contrib)
-      withMeta = renderMetaComment defaultPageMeta <> contribContent contrib
+      withMeta = renderMetaComment defaultPageMeta <> stripMetaLines (contribContent contrib)
       body = object
         [ "files" .= object
             [ Key.fromText filename .= object
@@ -94,7 +94,7 @@ updatePage config page contrib = do
         , metaVerifyCount  = pageVerifyCount page
         , metaFailCount    = pageFailCount page
         }
-      withMeta = renderMetaComment pageMeta <> contribContent contrib
+      withMeta = renderMetaComment pageMeta <> stripMetaLines (contribContent contrib)
       body = object
         [ "files" .= object
             [ Key.fromText filename .= object

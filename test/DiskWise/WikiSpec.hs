@@ -7,7 +7,7 @@ import Test.Hspec
 
 import DiskWise.Types
 import DiskWise.WikiRouter (matchPages, matchPagesHeuristic, parsePagePatterns, parsePageToolNames,
-                            parseMetaComment, renderMetaComment, PageMeta(..),
+                            parseMetaComment, renderMetaComment, stripMetaLines, PageMeta(..),
                             deduplicateContribs)
 
 -- | Helper to make a wiki page for testing
@@ -183,3 +183,28 @@ spec = do
           [result] = deduplicateContribs [page] [contrib]
       contribType result `shouldBe` AmendPage
       contribContent result `shouldBe` "Updated content"
+
+  describe "stripMetaLines" $ do
+    it "strips diskwise-meta comment lines from content" $ do
+      let content = T.unlines
+            [ "<!-- diskwise-meta: {\"last_verified\":\"2026-02-20T04:07:26Z\",\"verify_count\":1,\"fail_count\":0} -->"
+            , "# Claude CLI"
+            , "Some content."
+            ]
+      stripMetaLines content `shouldSatisfy` T.isInfixOf "# Claude CLI"
+      stripMetaLines content `shouldSatisfy` (not . T.isInfixOf "diskwise-meta")
+
+    it "strips multiple meta comment lines" $ do
+      let content = T.unlines
+            [ "<!-- diskwise-meta: {\"last_verified\":\"2026-02-20T04:51:11Z\",\"verify_count\":1,\"fail_count\":0} -->"
+            , "<!-- diskwise-meta: {\"last_verified\":\"2026-02-20T04:07:26Z\",\"verify_count\":1,\"fail_count\":0} -->"
+            , "# Claude CLI"
+            , "Some content."
+            ]
+      let result = stripMetaLines content
+      result `shouldSatisfy` T.isInfixOf "# Claude CLI"
+      result `shouldSatisfy` (not . T.isInfixOf "diskwise-meta")
+
+    it "leaves content without meta lines unchanged" $ do
+      let content = "# Page Title\nSome content.\n"
+      stripMetaLines content `shouldSatisfy` T.isInfixOf "# Page Title"

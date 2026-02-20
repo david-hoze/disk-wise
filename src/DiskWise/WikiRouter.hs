@@ -13,6 +13,7 @@ module DiskWise.WikiRouter
   , parsePagePatterns
   , parsePageToolNames
   , sanitizeContent
+  , stripMetaLines
   , updatePageMeta
   , parseMetaComment
   , renderMetaComment
@@ -53,6 +54,9 @@ parsePageToolNames = Wiki.parsePageToolNames
 
 sanitizeContent :: T.Text -> T.Text
 sanitizeContent = Wiki.sanitizeContent
+
+stripMetaLines :: T.Text -> T.Text
+stripMetaLines = Wiki.stripMetaLines
 
 updatePageMeta :: Bool -> IO (WikiPage -> WikiPage)
 updatePageMeta = Wiki.updatePageMeta
