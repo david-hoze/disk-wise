@@ -280,28 +280,31 @@ githubGet _config path = do
 -- | Make an authenticated PUT request to GitHub API
 githubPut :: AppConfig -> String -> Value -> IO (Either DiskWiseError Value)
 githubPut config path body = do
-  manager <- newManager tlsManagerSettings
-  let url = "https://api.github.com" <> path
-      token = configWikiToken config
-  initialRequest <- parseRequest url
-    `catch` (\(e :: SomeException) -> error $ "Bad URL: " <> url <> " " <> show e)
-  let request = initialRequest
-        { method = "PUT"
-        , requestHeaders =
-            [ ("User-Agent", "diskwise")
-            , ("Accept", "application/vnd.github.v3+json")
-            , (hContentType, "application/json")
-            , (hAuthorization, "Bearer " <> TE.encodeUtf8 token)
-            ]
-        , requestBody = RequestBodyLBS (encode body)
-        }
-  response <- httpLbs request manager
-    `catch` (\(_ :: SomeException) ->
-      pure $ error "HTTP request failed")
-  let status = statusCode (responseStatus response)
-  if status >= 200 && status < 300
-    then case eitherDecode (responseBody response) of
-      Right val -> pure (Right val)
-      Left _    -> pure (Right Null)  -- some PUT responses don't have JSON
-    else pure (Left (GitHubApiError
-      ("GitHub API returned status " <> T.pack (show status))))
+  let token = configWikiToken config
+  if T.null token
+    then pure (Left (GitHubApiError "DISKWISE_WIKI_TOKEN not set. Set this environment variable to a classic GitHub PAT with write access to the wiki repo."))
+    else do
+      manager <- newManager tlsManagerSettings
+      let url = "https://api.github.com" <> path
+      initialRequest <- parseRequest url
+        `catch` (\(e :: SomeException) -> error $ "Bad URL: " <> url <> " " <> show e)
+      let request = initialRequest
+            { method = "PUT"
+            , requestHeaders =
+                [ ("User-Agent", "diskwise")
+                , ("Accept", "application/vnd.github.v3+json")
+                , (hContentType, "application/json")
+                , (hAuthorization, "token " <> TE.encodeUtf8 token)
+                ]
+            , requestBody = RequestBodyLBS (encode body)
+            }
+      response <- httpLbs request manager
+        `catch` (\(_ :: SomeException) ->
+          pure $ error "HTTP request failed")
+      let status = statusCode (responseStatus response)
+      if status >= 200 && status < 300
+        then case eitherDecode (responseBody response) of
+          Right val -> pure (Right val)
+          Left _    -> pure (Right Null)  -- some PUT responses don't have JSON
+        else pure (Left (GitHubApiError
+          ("GitHub API returned status " <> T.pack (show status))))

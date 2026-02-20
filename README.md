@@ -126,7 +126,7 @@ DiskWise supports two ways to use Claude:
 
 ### Wiki Access
 
-The wiki is built in. No configuration needed. Reads are unauthenticated (public repo). For write access, set `DISKWISE_WIKI_TOKEN` with a GitHub token scoped to the wiki repo.
+The wiki is built in. Reads are unauthenticated (public repo). For write access, set `DISKWISE_WIKI_TOKEN` to a classic GitHub personal access token (PAT) with write access to the wiki repo.
 
 ## Usage
 

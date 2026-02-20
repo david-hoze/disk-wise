@@ -285,7 +285,7 @@ The wiki lives in a public GitHub repository. The agent accesses it via the GitH
 
 **Reading**: The repo is public. The agent reads files via unauthenticated GET requests to the GitHub Contents API. No token needed.
 
-**Writing**: A fine-grained GitHub token is baked into the tool, scoped to write access on the single wiki repo and nothing else. Every agent uses the same token. This is not a secret — the repo is public and every agent is equally trusted.
+**Writing**: The agent authenticates via a classic GitHub personal access token (PAT) provided in the `DISKWISE_WIKI_TOKEN` environment variable, scoped to write access on the single wiki repo and nothing else. Every agent uses the same token. This is not a secret — the repo is public and every agent is equally trusted. If the token is not set, wiki reads still work but writes will fail with a clear error.
 
 **Conflict handling**: The GitHub Contents API requires the file's current SHA to update it. If the SHA is stale (another agent wrote to the same file concurrently), the PUT will fail. The agent re-fetches the current SHA, re-applies its amendment to the latest content, and retries. It keeps retrying with a short backoff (1s, 2s, 4s, ...) up to 5 attempts. If all retries are exhausted, the contribution is saved to a local pending queue and retried at the start of the next session.
 
@@ -349,7 +349,7 @@ On Windows/MINGW, the scanner converts Windows paths (e.g., `C:\Users\foo`) to M
 4. **Agents can create and amend wiki content. The gardener can additionally reorganize, merge, and restructure.** The git history is the safety net. Every version is recoverable.
 5. **The wiki is useful on its own, even without the tool.** A human can browse it on GitHub and get value from it.
 6. **The tool is useful on its own, even without the wiki.** Claude can still analyze a system with no wiki context. The wiki just makes it better.
-7. **The tool requires zero configuration if the user has Claude Code installed.** Wiki access is built in. Claude access falls through to an existing subscription. The user just runs it.
+7. **The tool requires minimal configuration.** Wiki reads work out of the box (public repo). Wiki writes require the `DISKWISE_WIKI_TOKEN` environment variable (a classic GitHub PAT). Claude access falls through to an existing Claude Code subscription or an API key.
 8. **The gardener always uses the strongest model.** Wiki quality is a long-term investment. Cutting corners on model quality defeats the purpose.
 9. **Normal agents do not refactor the wiki.** They contribute raw knowledge. The gardener shapes it.
 10. **The meta wiki belongs to the gardener.** Normal agents do not read from or write to `_meta/`. This is enforced at two levels: `fetchTree` (used by the normal flow) filters out `_meta/` paths, and `offerLearn` defensively drops any contributions targeting `_meta/` before presenting them to the user. The gardener uses `fetchFullTree` which includes `_meta/` paths.
