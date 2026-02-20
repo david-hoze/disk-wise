@@ -341,12 +341,19 @@ buildLearnPrompt sessionLog identity = T.unlines $
   , ""
   , "Use this identity in History entries, e.g.:"
   , "- 2026-02-20: Description (" <> identity <> ")"
+  , ""
+  , "If the actual space freed differs significantly from the wiki's estimate,"
+  , "consider amending the wiki page with an observation about real-world sizes."
   ]
   where
-    formatEvent (ActionExecuted action output) =
-      "EXECUTED: " <> actionDescription action <> "\n  Output: " <> output
-    formatEvent (ActionFailed action err) =
-      "FAILED: " <> actionDescription action <> "\n  Error: " <> err
+    formatEvent (ActionExecuted outcome) =
+      "EXECUTED: " <> actionDescription (outcomeAction outcome)
+      <> "\n  Output: " <> outcomeMessage outcome
+      <> "\n  Expected: " <> maybe "(unknown)" id (outcomeExpected outcome)
+      <> " | Actual freed: " <> maybe "(not measured)" formatBytes (outcomeBytesFreed outcome)
+    formatEvent (ActionFailed outcome) =
+      "FAILED: " <> actionDescription (outcomeAction outcome)
+      <> "\n  Error: " <> outcomeMessage outcome
     formatEvent (ActionSkipped action reason) =
       "SKIPPED by user: " <> actionDescription action
       <> " (reason: " <> formatSkipReason reason <> ")"
@@ -354,6 +361,14 @@ buildLearnPrompt sessionLog identity = T.unlines $
       "WIKI PUSHED: " <> T.pack (contribPath contrib)
     formatEvent (ContribFailed contrib err) =
       "WIKI FAILED: " <> T.pack (contribPath contrib) <> " — " <> err
+
+-- | Format a byte count as a human-readable string
+formatBytes :: Integer -> T.Text
+formatBytes b
+  | b >= 1024 * 1024 * 1024 = T.pack (show (b `div` (1024 * 1024 * 1024))) <> " GB"
+  | b >= 1024 * 1024        = T.pack (show (b `div` (1024 * 1024))) <> " MB"
+  | b >= 1024               = T.pack (show (b `div` 1024)) <> " KB"
+  | otherwise               = T.pack (show b) <> " B"
 
 -- | Format a skip reason for display in prompts
 formatSkipReason :: SkipReason -> T.Text

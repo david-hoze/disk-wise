@@ -8,6 +8,8 @@ module DiskWise.Scanner
   , ValidationResult(..)
   , parseFindings
   , toMingwPath
+  , measurePathSize
+  , measureDiskFree
   ) where
 
 import Control.Exception (catch, SomeException)
@@ -196,3 +198,59 @@ parseFindings minBytes scanOutput =
       | any (`T.isInfixOf` lp) ["appdata"]                       = "app-data"
       | otherwise = "other"
       where lp = T.toLower path
+
+-- | Measure the size of a path in bytes using du.
+-- Returns Nothing if the path doesn't exist or the command fails.
+measurePathSize :: FilePath -> IO (Maybe Integer)
+measurePathSize path = do
+  -- Try du -sb first (Linux), fall back to du -sk (macOS/MINGW)
+  result <- try $ readCreateProcessWithExitCode
+    (proc "sh" ["-c", "du -sb " <> shellQuotePath path <> " 2>/dev/null"]) ""
+  case result of
+    Right (ExitSuccess, out, _) -> pure (parseDuBytes out)
+    _ -> do
+      result2 <- try $ readCreateProcessWithExitCode
+        (proc "sh" ["-c", "du -sk " <> shellQuotePath path <> " 2>/dev/null"]) ""
+      case result2 of
+        Right (ExitSuccess, out, _) -> pure (fmap (* 1024) (parseDuBytes out))
+        _ -> pure Nothing
+  where
+    try :: IO a -> IO (Either SomeException a)
+    try action = (Right <$> action) `catch` (\(e :: SomeException) -> pure (Left e))
+    parseDuBytes s = case reads (takeWhile (/= '\t') s) :: [(Integer, String)] of
+      [(n, _)] -> Just n
+      _        -> Nothing
+    shellQuotePath p = "'" <> concatMap esc p <> "'"
+    esc '\'' = "'\\''"
+    esc c    = [c]
+
+-- | Measure available disk space on the root filesystem in bytes.
+-- Returns Nothing if the command fails.
+measureDiskFree :: IO (Maybe Integer)
+measureDiskFree = do
+  -- Try df -B1 (Linux), fall back to df -k (macOS/MINGW)
+  result <- try $ readCreateProcessWithExitCode
+    (proc "sh" ["-c", "df -B1 --output=avail / 2>/dev/null | tail -1"]) ""
+  case result of
+    Right (ExitSuccess, out, _) | Just n <- parseNumber out -> pure (Just n)
+    _ -> do
+      result2 <- try $ readCreateProcessWithExitCode
+        (proc "sh" ["-c", "df -k / 2>/dev/null | tail -1"]) ""
+      case result2 of
+        Right (ExitSuccess, out, _) -> pure (parseDfKLine out)
+        _ -> pure Nothing
+  where
+    try :: IO a -> IO (Either SomeException a)
+    try action = (Right <$> action) `catch` (\(e :: SomeException) -> pure (Left e))
+    parseNumber s = case reads (dropWhile (== ' ') s) :: [(Integer, String)] of
+      [(n, _)] -> Just n
+      _        -> Nothing
+    -- Parse "df -k" output: filesystem 1K-blocks used available ...
+    -- Available is the 4th field
+    parseDfKLine s =
+      let ws = words s
+      in if length ws >= 4
+         then case reads (ws !! 3) :: [(Integer, String)] of
+                [(n, _)] -> Just (n * 1024)
+                _        -> Nothing
+         else Nothing

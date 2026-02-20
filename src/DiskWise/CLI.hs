@@ -164,17 +164,42 @@ offerCleanup config sessionRef pages actions = do
       answer <- getLine
       case answer of
         "y" -> do
+          freeBefore <- measureDiskFree
           result <- runCleanupAction action
+          freeAfter <- measureDiskFree
+          let bytesFreed = do
+                before <- freeBefore
+                after <- freeAfter
+                let diff = after - before
+                pure (if diff > 0 then diff else 0)
           case result of
             Right msg -> do
               TIO.putStrLn $ "  OK: " <> msg
-              modifyIORef ref (`addEvent` ActionExecuted action msg)
+              case bytesFreed of
+                Just b | b > 0 -> TIO.putStrLn $ "  Freed: ~"
+                  <> T.pack (show (b `div` (1024 * 1024))) <> " MB"
+                _ -> pure ()
+              let outcome = CleanupOutcome
+                    { outcomeAction = action
+                    , outcomeSuccess = True
+                    , outcomeMessage = msg
+                    , outcomeBytesFreed = bytesFreed
+                    , outcomeExpected = actionSizeEstimate action
+                    }
+              modifyIORef ref (`addEvent` ActionExecuted outcome)
               case actionWikiRef action of
                 Just wref -> recordOutcome cfg pgs (T.unpack wref) True
                 Nothing   -> pure ()
             Left err -> do
               TIO.putStrLn $ "  Error: " <> err
-              modifyIORef ref (`addEvent` ActionFailed action err)
+              let outcome = CleanupOutcome
+                    { outcomeAction = action
+                    , outcomeSuccess = False
+                    , outcomeMessage = err
+                    , outcomeBytesFreed = Nothing
+                    , outcomeExpected = actionSizeEstimate action
+                    }
+              modifyIORef ref (`addEvent` ActionFailed outcome)
               case actionWikiRef action of
                 Just wref -> recordOutcome cfg pgs (T.unpack wref) False
                 Nothing   -> pure ()

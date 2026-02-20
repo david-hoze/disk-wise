@@ -137,6 +137,17 @@ spec = do
     it "NotApplicable" $ jsonRoundTrip NotApplicable
     it "SkipReasonOther" $ jsonRoundTrip (SkipReasonOther "custom reason")
 
+  describe "CleanupOutcome JSON round-trip" $
+    it "outcome" $
+      jsonRoundTrip CleanupOutcome
+        { outcomeAction = CleanupAction "Clean npm" "npm cache clean" "low"
+            (Just "~500 MB") (Just "tools/npm.md")
+        , outcomeSuccess = True
+        , outcomeMessage = "done"
+        , outcomeBytesFreed = Just 524288000
+        , outcomeExpected = Just "~500 MB"
+        }
+
   describe "SessionLog" $ do
     it "starts empty" $ do
       logEvents emptySessionLog `shouldBe` []
@@ -144,7 +155,8 @@ spec = do
 
     it "tracks events with addEvent" $ do
       let action = CleanupAction "test" "echo hi" "low" Nothing Nothing
+          outcome = CleanupOutcome action True "done" Nothing Nothing
           sl = emptySessionLog
-                 `addEvent` ActionExecuted action "done"
+                 `addEvent` ActionExecuted outcome
                  `addEvent` ActionSkipped action NotNow
       length (logEvents sl) `shouldBe` 2

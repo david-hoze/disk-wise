@@ -12,6 +12,7 @@ module DiskWise.Types
   , AppConfig(..)
   , DiskWiseError(..)
   , SkipReason(..)
+  , CleanupOutcome(..)
   , SessionEvent(..)
   , SessionLog(..)
   , emptySessionLog
@@ -138,10 +139,22 @@ data SkipReason
 instance ToJSON SkipReason
 instance FromJSON SkipReason
 
+-- | Result of executing a cleanup action, with measured space data
+data CleanupOutcome = CleanupOutcome
+  { outcomeAction      :: CleanupAction
+  , outcomeSuccess     :: Bool
+  , outcomeMessage     :: Text
+  , outcomeBytesFreed  :: Maybe Integer  -- ^ Measured difference in free space
+  , outcomeExpected    :: Maybe Text     -- ^ What the wiki estimated (from actionSizeEstimate)
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CleanupOutcome
+instance FromJSON CleanupOutcome
+
 -- | An event that occurred during the session, for Claude to learn from
 data SessionEvent
-  = ActionExecuted CleanupAction Text   -- ^ action + output
-  | ActionFailed CleanupAction Text     -- ^ action + error message
+  = ActionExecuted CleanupOutcome       -- ^ action executed with outcome
+  | ActionFailed CleanupOutcome         -- ^ action failed with outcome
   | ActionSkipped CleanupAction SkipReason -- ^ user declined + reason
   | ContribPushed WikiContribution      -- ^ successfully pushed to wiki
   | ContribFailed WikiContribution Text -- ^ failed to push + error
