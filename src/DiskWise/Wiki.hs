@@ -255,18 +255,23 @@ pushContribution config pages contrib = go 0
                     Left _ -> go (attempt + 1)
             other -> pure other
 
--- | Make an unauthenticated GET request to GitHub API
+-- | Make a GET request to GitHub API (authenticated when token is available)
 githubGet :: AppConfig -> String -> IO (Either DiskWiseError Value)
-githubGet _config path = do
+githubGet config path = do
   manager <- newManager tlsManagerSettings
   let url = "https://api.github.com" <> path
+      token = configWikiToken config
+      baseHeaders =
+        [ ("User-Agent", "diskwise")
+        , ("Accept", "application/vnd.github.v3+json")
+        ]
+      headers = if T.null token
+        then baseHeaders
+        else baseHeaders <> [(hAuthorization, "token " <> TE.encodeUtf8 token)]
   initialRequest <- parseRequest url
     `catch` (\(e :: SomeException) -> error $ "Bad URL: " <> url <> " " <> show e)
   let request = initialRequest
-        { requestHeaders =
-            [ ("User-Agent", "diskwise")
-            , ("Accept", "application/vnd.github.v3+json")
-            ]
+        { requestHeaders = headers
         }
   response <- httpLbs request manager
     `catch` (\(e :: SomeException) -> pure $ error $ "HTTP error: " <> show e)

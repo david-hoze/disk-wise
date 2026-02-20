@@ -34,7 +34,9 @@ import qualified Data.ByteString as BS
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.FilePath ((</>))
 import System.Exit (ExitCode(..))
-import System.Process (readCreateProcessWithExitCode, readProcess, proc, shell)
+import System.IO (hSetBinaryMode)
+import System.Process (readCreateProcessWithExitCode, readProcess, proc, shell,
+                       createProcess, CreateProcess(..), StdStream(..), waitForProcess)
 
 import DiskWise.Types
 import DiskWise.Scanner (toMingwPath)
@@ -131,15 +133,30 @@ callClaudeCode modelOverride sysPrompt userPrompt = do
             Nothing -> ""
           cmd = unsetPrefix <> "claude --print" <> modelFlag
                 <> " < " <> shellQuote promptFile
-      result <- try $ readCreateProcessWithExitCode (proc "sh" ["-c", cmd]) ""
+      result <- try $ readProcessUtf8 "sh" ["-c", cmd]
       removeFile winPromptFile `catch` (\(_ :: SomeException) -> pure ())
       case result of
         Left (e :: SomeException) ->
           pure (Left (ClaudeError ("Claude CLI failed: " <> T.pack (show e))))
         Right (ExitSuccess, out, _) ->
-          pure (Right (T.pack out))
+          pure (Right out)
         Right (ExitFailure code, _, err) ->
-          pure (Left (ClaudeError ("Claude CLI exit " <> T.pack (show code) <> ": " <> T.pack err)))
+          pure (Left (ClaudeError ("Claude CLI exit " <> T.pack (show code) <> ": " <> err)))
+
+-- | Read a process's stdout/stderr as raw bytes and decode as UTF-8.
+-- This avoids the system code page mangling non-ASCII characters on Windows/MINGW.
+readProcessUtf8 :: FilePath -> [String] -> IO (ExitCode, T.Text, T.Text)
+readProcessUtf8 cmd args = do
+  (_, Just hOut, Just hErr, ph) <- createProcess (proc cmd args)
+    { std_out = CreatePipe
+    , std_err = CreatePipe
+    }
+  hSetBinaryMode hOut True
+  hSetBinaryMode hErr True
+  outBytes <- BS.hGetContents hOut
+  errBytes <- BS.hGetContents hErr
+  exitCode <- waitForProcess ph
+  pure (exitCode, TE.decodeUtf8 outBytes, TE.decodeUtf8 errBytes)
 
 -- | Shell-quote a string for safe embedding in sh -c commands
 shellQuote :: String -> String
