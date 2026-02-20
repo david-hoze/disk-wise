@@ -45,9 +45,9 @@ commonOptsParser = CommonOpts
         )
   <*> strOption
         ( long "model"
-       <> value "claude-sonnet-4-20250514"
+       <> value "4-20250514"
        <> metavar "MODEL"
-       <> help "Analysis model (default: claude-sonnet-4-20250514)"
+       <> help "Analysis engine)"
         )
   <*> optional (strOption
         ( long "api-key"

@@ -115,7 +115,7 @@ spec = do
         , configWikiToken  = "ghp_test123"
         , configScanPaths  = ["/home/user", "/var"]
         , configMinSizeMB  = 50
-        , configModel      = "claude-sonnet-4-20250514"
+        , configModel      = "engine-50514"
         , configGistId     = ""
         }
 

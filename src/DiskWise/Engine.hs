@@ -86,7 +86,7 @@ callEngineGarden :: AppConfig -> T.Text -> T.Text -> IO (Either DiskWiseError T.
 callEngineGarden config sysPrompt userPrompt =
   if T.null (configApiKey config)
   then pure (Left (EngineError "No API key set. Set DISKWISE_API_KEY or pass --api-key."))
-  else callEngineApi config (Just "claude-opus-4-6") sysPrompt userPrompt
+  else callEngineApi config (Just "engine-api") sysPrompt userPrompt
 
 -- | Call the analysis engine via the API
 callEngineApi :: AppConfig -> Maybe T.Text -> T.Text -> T.Text -> IO (Either DiskWiseError T.Text)

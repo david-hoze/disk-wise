@@ -2,10 +2,6 @@
 
 The gardener is a separate command (`diskwise garden`) that improves wiki quality. It is never invoked as part of the normal investigate flow.
 
-## Model
-
-The gardener always uses the strongest available model (`claude-opus-4-6`) at high effort. Wiki gardening requires the strongest reasoning available — it involves judging quality, spotting subtle duplication, making organizational decisions, and writing clear prose. Weaker or faster models are not suitable.
-
 ## Flow
 
 1. The gardener fetches the entire wiki, including the meta wiki (`_meta/`).

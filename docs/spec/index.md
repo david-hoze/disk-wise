@@ -17,7 +17,6 @@ DiskWise learns from every session — tracking what worked, what failed, what t
 5. **[Garden](garden.md)** — Wiki quality improvement and meta wiki
 6. **[Session Learning](session-learning.md)** — Cross-session intelligence: skip patterns, regrowth tracking, command reliability, feedback loops
 7. **[Wiki Structure](wiki-structure.md)** — Directory layout, page format, wiki access, gist backend
-8. **[Engine Access](claude-access.md)** — API key access, model selection
-9. **[Batch Mode](batch-mode.md)** — JSON subcommands for scripting
-10. **[Scanner Design](scanner-design.md)** — Generic filesystem scanning
-11. **[Invariants](invariants.md)** — Core principles and guarantees
+8. **[Batch Mode](batch-mode.md)** — JSON subcommands for scripting
+9. **[Scanner Design](scanner-design.md)** — Generic filesystem scanning
+10. **[Invariants](invariants.md)** — Core principles and guarantees

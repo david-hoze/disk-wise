@@ -64,12 +64,8 @@ cabal build
 cabal install
 
 # Run
-DISKWISE_API_KEY=your-key diskwise
+DISKWISE_WIKI_TOKEN=your-key diskwise
 ```
-
-### API Access
-
-Set `DISKWISE_API_KEY` in your environment or pass `--api-key` on the command line.
 
 ### Wiki Access
 
@@ -92,12 +88,6 @@ diskwise --scan-path /home --scan-path /var
 
 # Set minimum file size to report
 diskwise --min-size 100
-
-# Override API key
-diskwise --api-key sk-ant-...
-
-# Use a different model
-diskwise --model claude-sonnet-4-20250514
 
 # Use gist backend instead of repo
 diskwise --gist-id abc123def456
@@ -167,7 +157,7 @@ diskwise/
 │       ├── garden.md        # Wiki gardening + meta wiki
 │       ├── session-learning.md  # Cross-session intelligence
 │       ├── wiki-structure.md    # Wiki layout, access, gist backend
-│       ├── claude-access.md     # Engine / API access
+│       ├── engine-access.md     # Engine / API access
 │       ├── batch-mode.md        # JSON subcommands
 │       ├── scanner-design.md    # Scanner internals
 │       └── invariants.md        # Core principles

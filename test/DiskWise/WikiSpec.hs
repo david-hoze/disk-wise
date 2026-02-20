@@ -188,21 +188,21 @@ spec = do
     it "strips diskwise-meta comment lines from content" $ do
       let content = T.unlines
             [ "<!-- diskwise-meta: {\"last_verified\":\"2026-02-20T04:07:26Z\",\"verify_count\":1,\"fail_count\":0} -->"
-            , "# Claude CLI"
+            , "# Engine CLI"
             , "Some content."
             ]
-      stripMetaLines content `shouldSatisfy` T.isInfixOf "# Claude CLI"
+      stripMetaLines content `shouldSatisfy` T.isInfixOf "# Engine CLI"
       stripMetaLines content `shouldSatisfy` (not . T.isInfixOf "diskwise-meta")
 
     it "strips multiple meta comment lines" $ do
       let content = T.unlines
             [ "<!-- diskwise-meta: {\"last_verified\":\"2026-02-20T04:51:11Z\",\"verify_count\":1,\"fail_count\":0} -->"
             , "<!-- diskwise-meta: {\"last_verified\":\"2026-02-20T04:07:26Z\",\"verify_count\":1,\"fail_count\":0} -->"
-            , "# Claude CLI"
+            , "# Engine CLI"
             , "Some content."
             ]
       let result = stripMetaLines content
-      result `shouldSatisfy` T.isInfixOf "# Claude CLI"
+      result `shouldSatisfy` T.isInfixOf "# Engine CLI"
       result `shouldSatisfy` (not . T.isInfixOf "diskwise-meta")
 
     it "leaves content without meta lines unchanged" $ do
