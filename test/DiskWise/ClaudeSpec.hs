@@ -6,7 +6,8 @@ import qualified Data.Text as T
 import Test.Hspec
 
 import DiskWise.Types
-import DiskWise.Claude (buildPrompt, buildSystemPrompt, buildLearnPrompt,
+import DiskWise.Claude (buildPrompt, buildPromptWith, buildSystemPrompt,
+                        buildLearnPrompt,
                         buildGardenSystemPrompt, buildGardenPrompt,
                         parseAdvice, parseRefactorResult,
                         prefixCommitMsg, prefixGardenerMsg, extractJson)
@@ -32,6 +33,11 @@ spec = do
       let prompt = buildSystemPrompt
       prompt `shouldSatisfy` T.isInfixOf "OBSERVATIONS FROM THIS SPECIFIC SYSTEM"
       prompt `shouldSatisfy` T.isInfixOf "Do NOT write generic tool documentation"
+
+    it "includes diagnostic command guidance" $ do
+      let prompt = buildSystemPrompt
+      prompt `shouldSatisfy` T.isInfixOf "diagnostic"
+      prompt `shouldSatisfy` T.isInfixOf "Do NOT include diagnostic commands"
 
   describe "buildPrompt" $ do
     it "includes scan output" $ do
@@ -69,6 +75,18 @@ spec = do
           prompt = buildPrompt "scan output" [] [finding]
       prompt `shouldSatisfy` T.isInfixOf "NOVEL FINDINGS"
       prompt `shouldSatisfy` T.isInfixOf "5GB temp file"
+
+  describe "buildPromptWith previously cleaned paths" $ do
+    it "includes PREVIOUSLY CLEANED section when paths are non-empty" $ do
+      let prompt = buildPromptWith "scan output" [] [] []
+                     [("/home/.npm", 524288000), ("/home/.cache", 1073741824)]
+      prompt `shouldSatisfy` T.isInfixOf "PREVIOUSLY CLEANED"
+      prompt `shouldSatisfy` T.isInfixOf "/home/.npm"
+      prompt `shouldSatisfy` T.isInfixOf "/home/.cache"
+
+    it "omits PREVIOUSLY CLEANED section when paths are empty" $ do
+      let prompt = buildPromptWith "scan output" [] [] [] []
+      prompt `shouldSatisfy` (not . T.isInfixOf "PREVIOUSLY CLEANED")
 
   describe "buildLearnPrompt" $ do
     it "includes session events" $ do

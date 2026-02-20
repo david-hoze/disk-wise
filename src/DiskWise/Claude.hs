@@ -64,9 +64,10 @@ prefixCommitMsg msg
 
 -- | Call Claude to investigate disk usage with wiki context
 investigate :: AppConfig -> T.Text -> [(WikiPage, [Finding])] -> [Finding]
-           -> [CommandStats] -> IO (Either DiskWiseError ClaudeAdvice)
-investigate config scanOutput matchedPages novelFindings cmdStats = do
-  let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats
+           -> [CommandStats] -> [(FilePath, Integer)]
+           -> IO (Either DiskWiseError ClaudeAdvice)
+investigate config scanOutput matchedPages novelFindings cmdStats prevCleaned = do
+  let userPrompt = buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned
       sysPrompt = buildSystemPrompt
   result <- callClaude config sysPrompt userPrompt
   case result of
@@ -249,6 +250,12 @@ buildSystemPrompt = T.unlines
   , ""
   , "Guidelines:"
   , "- Propose cleanup_actions for anything that can safely free space"
+  , "- cleanup_actions MUST ONLY contain commands that actually free disk space"
+  , "  (rm, cache clean, prune, etc.). Do NOT include diagnostic commands"
+  , "  (du, ls, df, find) as cleanup actions. Mention investigation suggestions"
+  , "  in the analysis text instead."
+  , "- If the scan already shows a large reclaimable area, propose a direct"
+  , "  cleanup command rather than an investigative command."
   , "- Set risk_level: low for caches/temp, medium for logs/old files, high for data"
   , "- Use CreatePage for new tools/topics, AmendPage to add info to existing pages"
   , "- Wiki pages should be generic (useful to anyone), not user-specific"
@@ -288,11 +295,12 @@ buildSystemPrompt = T.unlines
 
 -- | Build the user message with scan output + wiki context + novel findings
 buildPrompt :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> T.Text
-buildPrompt scanOutput matchedPages novelFindings = buildPromptWith scanOutput matchedPages novelFindings []
+buildPrompt scanOutput matchedPages novelFindings = buildPromptWith scanOutput matchedPages novelFindings [] []
 
--- | Build prompt with optional command reliability stats
-buildPromptWith :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> [CommandStats] -> T.Text
-buildPromptWith scanOutput matchedPages novelFindings cmdStats = T.unlines $
+-- | Build prompt with optional command reliability stats and previously cleaned paths
+buildPromptWith :: T.Text -> [(WikiPage, [Finding])] -> [Finding] -> [CommandStats]
+               -> [(FilePath, Integer)] -> T.Text
+buildPromptWith scanOutput matchedPages novelFindings cmdStats prevCleaned = T.unlines $
   [ "== SCAN OUTPUT =="
   , scanOutput
   , ""
@@ -311,8 +319,16 @@ buildPromptWith scanOutput matchedPages novelFindings cmdStats = T.unlines $
   ) <>
   (let statsText = formatCommandStats cmdStats
    in if T.null statsText then [] else [statsText]
+  ) <>
+  (if null prevCleaned then []
+   else [ "== PREVIOUSLY CLEANED =="
+        , "These paths were cleaned in a recent session. Avoid re-suggesting them"
+        , "unless the scan shows they have significantly regrown."
+        ] <> map formatPrevCleaned prevCleaned <> [""]
   )
   where
+    formatPrevCleaned (path, bytes) =
+      "- " <> T.pack path <> " (freed " <> formatBytes bytes <> ")"
     formatMatchedPage (page, findings) =
       [ "--- " <> pageTitle page <> " (" <> T.pack (pageRelPath page) <> ") ---"
       , pageBody page

@@ -99,7 +99,8 @@ runInvestigate config = do
   -- Step 5: Call Claude for investigation
   TIO.putStrLn "-- Asking Claude to analyze --\n"
   let cmdStats = computeCommandStats history
-  result <- investigate config scanOutput matched novelFindings cmdStats
+      prevCleaned = maybe [] summaryCleanedPaths prevSummary
+  result <- investigate config scanOutput matched novelFindings cmdStats prevCleaned
   case result of
     Left err -> TIO.putStrLn $ "Error: " <> T.pack (show err)
     Right advice -> do
@@ -111,7 +112,10 @@ runInvestigate config = do
       -- Step 7: Offer cleanup actions (tracking results in session)
       offerCleanup config sessionRef wikiPages (adviceCleanupActions advice)
 
-      -- Step 8: Session-aware learning — ask Claude to review the whole session
+      -- Step 8: Post-cleanup feedback (before learning so feedback is visible)
+      postCleanupFeedback sessionRef
+
+      -- Step 9: Session-aware learning — ask Claude to review the whole session
       TIO.putStrLn "-- Learning from session --\n"
       session <- readIORef sessionRef
       let cmdStatsText = formatCommandStats cmdStats
@@ -126,11 +130,8 @@ runInvestigate config = do
               Left _ -> adviceContributions advice
             Left _ -> adviceContributions advice
 
-      -- Step 9: Offer wiki contributions
+      -- Step 10: Offer wiki contributions
       _ <- offerLearn config sessionRef wikiPages allContribs
-
-      -- Step 10: Post-cleanup feedback check
-      postCleanupFeedback sessionRef
 
       -- Step 11: Save session summary for cross-session learning
       finalSession <- readIORef sessionRef
@@ -240,6 +241,7 @@ offerCleanup config sessionRef pages actions = do
       TIO.putStrLn ""
 
 -- | Offer wiki contributions for approval and push. Returns paths that were pushed.
+-- Supports batch approve (a) and batch skip (s) to avoid repetitive prompting.
 offerLearn :: AppConfig -> IORef SessionLog -> [WikiPage] -> [WikiContribution] -> IO [FilePath]
 offerLearn _ _ _ [] = do
   TIO.putStrLn "No wiki contributions suggested.\n"
@@ -249,11 +251,13 @@ offerLearn config sessionRef pages contribs = do
       filtered = filter (\c -> not (T.isPrefixOf "_meta/" (T.pack (contribPath c)))) deduped
   TIO.putStrLn $ "-- " <> T.pack (show (length filtered))
               <> " wiki contribution(s) suggested --\n"
-  pushed <- mapM (offerOne config sessionRef pages) filtered
+  -- Nothing = ask each, Just True = approve all, Just False = skip all
+  batchRef <- newIORef (Nothing :: Maybe Bool)
+  pushed <- mapM (offerOne config sessionRef batchRef pages) filtered
   TIO.putStrLn ""
   pure [p | Just p <- pushed]
   where
-    offerOne cfg ref pgs contrib = do
+    offerOne cfg ref batchRef pgs contrib = do
       let prefixed = contrib { contribSummary = prefixCommitMsg (contribSummary contrib) }
       TIO.putStrLn $ "  Type:    " <> T.pack (show (contribType prefixed))
       TIO.putStrLn $ "  Path:    " <> T.pack (contribPath prefixed)
@@ -264,23 +268,29 @@ offerLearn config sessionRef pages contribs = do
       when (length (T.lines (contribContent prefixed)) > 10) $
         TIO.putStrLn "    ..."
 
-      TIO.putStr "  Push to wiki? [y] yes  [n] skip  [e] edit first > "
-      hFlush stdout
-      answer <- getLine
+      batchMode <- readIORef batchRef
+      answer <- case batchMode of
+        Just True  -> do
+          TIO.putStrLn "  [auto-approve]"
+          pure "y"
+        Just False -> do
+          TIO.putStrLn "  [auto-skip]"
+          pure "n"
+        Nothing -> do
+          TIO.putStr "  Push to wiki? [y] yes  [n] skip  [e] edit first  [a] approve all  [s] skip all > "
+          hFlush stdout
+          getLine
+
       case answer of
-        "y" -> do
-          result <- pushContribution cfg pgs prefixed
-          case result of
-            Right () -> do
-              TIO.putStrLn "  OK: Contribution pushed to wiki."
-              modifyIORef ref (`addEvent` ContribPushed prefixed ContribApproved)
-              pure (Just (contribPath prefixed))
-            Left err -> do
-              TIO.putStrLn $ "  Error: " <> T.pack (show err)
-              TIO.putStrLn "  Saving to ~/.diskwise/pending/ for next session."
-              savePending prefixed
-              modifyIORef ref (`addEvent` ContribFailed prefixed (T.pack (show err)))
-              pure Nothing
+        "a" -> do
+          writeIORef batchRef (Just True)
+          pushOne cfg ref pgs prefixed
+        "s" -> do
+          writeIORef batchRef (Just False)
+          TIO.putStrLn "  Skipped."
+          modifyIORef ref (`addEvent` ContribPushed prefixed ContribSkipped)
+          pure Nothing
+        "y" -> pushOne cfg ref pgs prefixed
         "e" -> do
           TIO.putStrLn "  Editing is not yet supported in this terminal."
           TIO.putStrLn "  Pushing original content."
@@ -299,6 +309,20 @@ offerLearn config sessionRef pages contribs = do
         _ -> do
           TIO.putStrLn "  Skipped."
           modifyIORef ref (`addEvent` ContribPushed prefixed ContribSkipped)
+          pure Nothing
+
+    pushOne cfg ref pgs prefixed = do
+      result <- pushContribution cfg pgs prefixed
+      case result of
+        Right () -> do
+          TIO.putStrLn "  OK: Contribution pushed to wiki."
+          modifyIORef ref (`addEvent` ContribPushed prefixed ContribApproved)
+          pure (Just (contribPath prefixed))
+        Left err -> do
+          TIO.putStrLn $ "  Error: " <> T.pack (show err)
+          TIO.putStrLn "  Saving to ~/.diskwise/pending/ for next session."
+          savePending prefixed
+          modifyIORef ref (`addEvent` ContribFailed prefixed (T.pack (show err)))
           pure Nothing
 
 -- | Retry pending contributions from previous sessions
